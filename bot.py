@@ -67,8 +67,8 @@ daily_api_key = os.getenv("DAILY_API_KEY", "")
 daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
 
 # Load system instructions from text files
-with open("prompts/voicemail_system_instruction.txt", "r") as f:
-    voicemail_system_instruction = f.read()
+with open("prompts/voicemail_detection_system_instruction.txt", "r") as f:
+    voicemail_detection_system_instruction = f.read()
 
 with open("prompts/human_conversation_system_instruction.txt", "r") as f:
     human_conversation_system_instruction = f.read()
@@ -131,21 +131,8 @@ async def main(
         #     tools=tools,
         # )
 
+        voicemail_detection_llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
-
-    # weather_function = FunctionSchema(
-    #     name="get_weather",
-    #     description="Get the current weather",
-    #     properties={
-    #         "location": {
-    #             "type": "string",
-    #             "description": "The city and state, e.g. San Francisco, CA",
-    #         },
-    #     },
-    #     required=["location"],
-    # )
-    # tools = ToolsSchema(standard_tools=[weather_function])
-        
 
         # tools
 
@@ -159,12 +146,44 @@ async def main(
         async def terminate_call_back(params: FunctionCallParams):
             await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
         
+        ## leave a message
+        switch_to_voicemail_response = FunctionSchema(
+            name="switch_to_voicemail_response",
+            description="Call this function when you detect this is a voicemail system.",
+            properties={},
+            required=[],
+        )
+        async def switch_to_voicemail_callback(params: FunctionCallParams):
+            message = """You are a constituent of Orleans Parish (New Orleans, Louisiana) leaving a voicemail message for a political representative. 
+            Say EXACTLY this message and then terminate the call:
+            'Hi, My name is Vanessa and I am a resident of Orleens parish. I'm calling today to voice my concerns. Thank you.'"""
+            await result_callback(message)
+
+        ## talk to a human
+        switch_to_human_conversation_response = FunctionSchema(
+            name="switch_to_human_conversation_response",
+            description="Call this function when you detect this is a human.",
+            properties={},
+            required=[],
+        )
+        async def switch_to_human_conversation_callback(params: FunctionCallParams):
+            # this will end the voicemail_detection pipeline runner task
+            await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+
 
         tools = ToolsSchema(standard_tools=[terminate_call_function])
 
+        # both llms may have to terminate the call
         human_conversation_llm.register_function("terminate_call", terminate_call_back)
+        voicemail_detection_llm.register_function("terminate_call", terminate_call_back)
+        
+        # only vm dectection llm needs to be able to leave a message
+        voicemail_detection_llm.register_function("switch_to_voicemail_response", switch_to_voicemail_callback)
+        
+        # only vm dectection llm needs to be able to swith to human convo
+        voicemail_detection_llm.register_function("switch_to_human_conversation_response", switch_to_human_conversation_callback)
 
-        # MCP
+        # mcp.run tools (fetch)
         try:
             mcp = MCPClient(server_params=os.getenv("ADP_MCP_RUN_SSE_URL"))
         except Exception as e:
@@ -173,17 +192,56 @@ async def main(
 
         mcp_tools = await mcp.register_tools(human_conversation_llm)
 
-        # all_standard_tools = mcp_tools.standard_tools + tools
         all_standard_tools = mcp_tools.standard_tools + tools.standard_tools
         all_tools = ToolsSchema(standard_tools=all_standard_tools)
 
-        messages = [{"role": "system", "content": human_conversation_system_instruction}]
-        human_conversation_context = OpenAILLMContext(messages, all_tools)
+
+        # human convo aggregator
+        human_conversation_messages = [{"role": "system", "content": human_conversation_system_instruction}]
+        human_conversation_context = OpenAILLMContext(human_conversation_messages, all_tools)
 
         human_conversation_context_aggregator = human_conversation_llm.create_context_aggregator(
             human_conversation_context
         )
 
+        # voicemail aggregator
+        voicemail_detection_messages = [{"role": "system", "content": voicemail_detection_system_instruction}]
+        voicemail_detection_context = OpenAILLMContext(voicemail_detection_messages, all_tools)
+
+        voicemail_detection_context_aggregator = voicemail_detection_llm.create_context_aggregator(
+            voicemail_detection_context
+        )
+
+
+        # =================================
+        # voicemail_detection_pipeline
+        # =================================
+        voicemail_detection_pipeline = Pipeline(
+            [
+                transport.input(),  # Transport user input
+                stt,
+                # voicemail_detection_audio_collector,  # Collect audio frames
+                
+                voicemail_detection_context_aggregator.user(),  # User spoken responses
+                voicemail_detection_llm,  # LLM
+                tts,  # TTS
+                transport.output(),  # Transport bot output
+                voicemail_detection_context_aggregator.assistant(),  # Assistant spoken responses and tool context
+            ]
+        )
+
+        voicemail_detection_task = PipelineTask(
+            voicemail_detection_pipeline,
+            params=PipelineParams(
+                allow_interruptions=True,
+                enable_metrics=True,
+            ),
+        )
+        # =================================
+
+
+        # =================================
+        # human_conversation_pipeline
         # =================================
         human_conversation_pipeline = Pipeline(
             [
@@ -230,26 +288,49 @@ async def main(
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
+            await voicemail_detection_task.queue_frame(EndFrame())
             await human_conversation_task.queue_frame(EndFrame())
-            # await voicemail_detection_pipeline_task.queue_frame(EndFrame())
 
 
         # =================================
-        runner = PipelineRunner(handle_sigint=False)
+        # runner
+        # =================================
+        runner = PipelineRunner(handle_sigint=True)
         # runner = PipelineRunner()
+        # =================================
+        
 
+        # # =================================
+        # # voicemail_detection_task
+        # # =================================
+        # # Run the voicemail_detection pipeline
+        # try:
+        #     print("!!! starting voicemail_detection pipeline ☎️")
+        #     await runner.run(voicemail_detection_task)
+        # except Exception as e:
+        #     logger.error(f"☎️ Error in voicemail_detection pipeline: {e}")
+        #     import traceback
+
+        #     logger.error(traceback.format_exc())
+
+        # print("!!! Done with voicemail_detection pipeline ☎️")
+        # # =================================
+
+
+        # =================================
+        # human_conversation_task
+        # =================================
         # Run the human conversation pipeline
         try:
+            print("!!! starting human_conversation pipeline 👾")
             await runner.run(human_conversation_task)
         except Exception as e:
-            logger.error(f"Error in human_conversation pipeline: {e}")
+            logger.error(f"👾 Error in human_conversation pipeline: {e}")
             import traceback
 
             logger.error(traceback.format_exc())
 
-        print("!!! Done with human_conversation pipeline")
-
-        await runner.run(human_conversation_task)
+        print("!!! Done with human_conversation pipeline 👾")
         # =================================
 
 
