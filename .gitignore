@@ -4,3 +4,9 @@ __pycache__
 .DS_Store
 resources/*
 !resources/resources.txt
+
+# local pipecat-ai module copy for hacking
+pipecat
+
+# my doodles are in here
+notes.txt

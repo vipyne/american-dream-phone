@@ -30,9 +30,12 @@ daily_api_key = os.getenv("DAILY_API_KEY", "")
 daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
 room_url = os.getenv("DAILY_SAMPLE_ROOM_URL", None)
 
+BOT_FILENAME="voicemail_detection"
+BOT_FILENAME="bot"
+
 daily_helpers = {}
 
-async def start_bot(room_details: Dict[str, str], body: Dict[str, Any]) -> bool:
+async def start_bot(room_details: Dict[str, str], body: Dict[str, Any], bot_filename: str) -> bool:
     """Start a bot process with the given configuration.
     Args:
         room_details: Room URL and token
@@ -46,7 +49,7 @@ async def start_bot(room_details: Dict[str, str], body: Dict[str, Any]) -> bool:
     body_json = json.dumps(body).replace('"', '\\"')
     print(f"++++ Body JSON: {body_json}")
 
-    bot_proc = f'python3 -m voicemail_detection -u {room_url} -t {token} -b "{body_json}"'
+    bot_proc = f'python3 -m {bot_filename} -u {room_url} -t {token} -b "{body_json}"'
     print(f"Starting bot. Room: {room_url}")
 
     try:
@@ -87,6 +90,7 @@ app.add_middleware(
 async def handle_start_request(request: Request) -> JSONResponse:
     """Unified endpoint to handle bot configuration for different scenarios."""
 
+    bot_filename = BOT_FILENAME
     room_url = os.getenv("DAILY_SAMPLE_ROOM_URL", None)
     if not room_url:
         params = DailyRoomParams(properties={"start_video_off":True})
@@ -102,9 +106,9 @@ async def handle_start_request(request: Request) -> JSONResponse:
         token = await daily_helpers["rest"].get_token(room_url, MAX_SESSION_TIME)
         room_details = {"room_url": room_url, "token": token}
         
-        await start_bot(room_details, body)
+        await start_bot(room_details, body, bot_filename)
 
-        response = {"status": "Bot started", "bot_type": "voicemail_detection"}
+        response = {"status": "Bot started", "bot_type": bot_filename}
         
         # pstn (phone)
         if "dialout_settings" in body and len(body["dialout_settings"]) > 0:
@@ -112,7 +116,8 @@ async def handle_start_request(request: Request) -> JSONResponse:
             response["dialing_to"] = f"phone:{number['phoneNumber']}"
 
         # test (webrtc)
-        is_test_mode = body["voicemail_detection"]["testInPrebuilt"]
+        # is_test_mode = body[bot_filename]["testInPrebuilt"]
+        is_test_mode = body["testInPrebuilt"]
         if is_test_mode:
             response["room_url"] = room_details["room_url"]
 
