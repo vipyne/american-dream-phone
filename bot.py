@@ -118,7 +118,6 @@ async def main(
 
         stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-
         human_conversation_llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
         
         # human_conversation_llm = AnthropicLLMService(
@@ -148,11 +147,24 @@ async def main(
     # tools = ToolsSchema(standard_tools=[weather_function])
         
 
+        # tools
+
+        ## terminate call
+        terminate_call_function = FunctionSchema(
+            name="terminate_call",
+            description="Call this function to terminate the call.",
+            properties={},
+            required=[],
+        )
+        async def terminate_call_back(params: FunctionCallParams):
+            await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
         
 
-        # tools & MCP
-        tools = [] # til we figure out what to write here
+        tools = ToolsSchema(standard_tools=[terminate_call_function])
 
+        human_conversation_llm.register_function("terminate_call", terminate_call_back)
+
+        # MCP
         try:
             mcp = MCPClient(server_params=os.getenv("ADP_MCP_RUN_SSE_URL"))
         except Exception as e:
@@ -161,8 +173,8 @@ async def main(
 
         mcp_tools = await mcp.register_tools(human_conversation_llm)
 
-        all_standard_tools = mcp_tools.standard_tools + tools
-        # all_standard_tools = mcp_tools.standard_tools + tools.standard_tools
+        # all_standard_tools = mcp_tools.standard_tools + tools
+        all_standard_tools = mcp_tools.standard_tools + tools.standard_tools
         all_tools = ToolsSchema(standard_tools=all_standard_tools)
 
         messages = [{"role": "system", "content": human_conversation_system_instruction}]
@@ -197,7 +209,6 @@ async def main(
         # event handlers
         @transport.event_handler("on_joined")
         async def on_joined(transport, data):
-            # Start dialout if needed
             if not test_mode and dialout_settings:
                 logger.debug("Dialout settings detected; starting dialout")
                 await call_config_manager.start_dialout(transport, dialout_settings)
@@ -209,7 +220,6 @@ async def main(
         @transport.event_handler("on_dialout_answered")
         async def on_dialout_answered(transport, data):
             logger.debug(f"Dial-out answered: {data}")
-            # Start capturing transcription
             await transport.capture_participant_transcription(data["sessionId"])
 
         @transport.event_handler("on_first_participant_joined")
@@ -220,9 +230,8 @@ async def main(
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
-            # Mark that a participant left early
-            session_manager.call_flow_state.set_participant_left_early()
-            await voicemail_detection_pipeline_task.queue_frame(EndFrame())
+            await human_conversation_task.queue_frame(EndFrame())
+            # await voicemail_detection_pipeline_task.queue_frame(EndFrame())
 
 
         # =================================
