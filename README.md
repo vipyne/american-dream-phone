@@ -5,8 +5,10 @@
 > Democracy dies in silence
 
 
-`American Dream Phone` is a Voice AI Agent [Pipecat](https://github.com/pipecat-ai/pipecat) app to call your representatives. Revenge of the robo-calls. But also, civic engagement. Yay.
-Actual LLM service, STT service, and TTS services are all changeable.
+The first thing you need to know is that in the 90's, there was a board game called Electronic Dream Phone. This is a real thing that existed.
+With that whimsy in mind, `American Dream Phone` is a Voice AI Agent [Pipecat](https://github.com/pipecat-ai/pipecat) app to call your representatives. Revenge of the robo-calls. But also, civic engagement. Yay.
+
+> LLM, STT, and TTS (& more) services are all changeable.
 
 ## setup
 
@@ -15,19 +17,29 @@ set env vars
 cp env.example .env
 ```
 
-### options
-todo
-- llm
-- stt
-- tts
-- ...
-
-
 ```bash
 python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
+
+### services
+By using pipecat, all services (transport, LLM, STT, and TTS) can all be changed. These are just the ones I started with.
+
+- "Orchestration"
+	- [pipecat](https://github.com/pipecat-ai/pipecat) - Python framework; the glue that makes it all possible.
+- transport
+	- [Daily](https://www.daily.co/) - webrtc transport [docs](https://docs.pipecat.ai/client/ios/transports/daily)
+- LLM
+	- OpenAI - get API key at [`"platform.openai.com/api-keys"`](https://platform.openai.com/api-keys)
+- STT
+	- Cartesia - get API key at [`"play.cartesia.ai/keys"`](https://play.cartesia.ai/keys)
+- TTS
+	- PlayAI - get API key at [`"app.play.ht/api/keys"`](https://app.play.ht/api/keys)
+- MCP server for fetch
+	- mcp.run - [`"mcp.run"`](https://www.mcp.run/)
+	- connect as many MCP servers as you like...
+
 
 ## run
 
@@ -64,5 +76,5 @@ curl -X POST "http://localhost:7860/start" \
 ## credits
 
 - huge shout out to [this pipecat example](https://github.com/pipecat-ai/pipecat/tree/main/examples/phone-chatbot)
-- [e l e c t r o n i c Dream Phone](https://consolemods.org/wiki/Dreamphone)
+- [E l e c t r o n i c Dream Phone](https://consolemods.org/wiki/Dreamphone)
 

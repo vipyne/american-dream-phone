@@ -48,6 +48,7 @@ from pipecat.transports.services.daily import (
     DailyTransport,
 )
 
+from pipecat.services.groq.llm import GroqLLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -90,10 +91,7 @@ async def main(
     token: str,
     body: dict,
 ):
-    print(f"_____bot.py * main: {body}")
     dailout_helper = DialOutHelper(body=body)
-    # json_body = json.loads(body)
-    # test_mode = json_body["testInPrebuilt"]
     test_mode = dailout_helper.get_is_test_mode()
     print(f"_____bot.py * test_mode: {test_mode}")
 
@@ -118,9 +116,10 @@ async def main(
             ),
         )
 
+        # test voice
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY", ""),
-            voice_id="b7d50908-b17c-442d-ad8d-810c63997ed9",  # Use Helpful Woman voice by default
+            voice_id="b7d50908-b17c-442d-ad8d-810c63997ed9", # Helpful Woman
         )
 
         # ## vanessa's voice
@@ -134,6 +133,13 @@ async def main(
         stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
         human_conversation_llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+        voicemail_detection_llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+
+        ##### playing around and trying different llms
+        ##### different llms might like different prompts
+        ##### some might be faster at voicemail detection...
+
+        # human_conversation_llm = GroqLLMService(api_key=os.getenv("GROQ_API_KEY"))
 
         # human_conversation_llm = AnthropicLLMService(
         #     api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-7-sonnet-latest"
@@ -146,10 +152,11 @@ async def main(
         #     tools=tools,
         # )
 
-        voicemail_detection_llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+        # voicemail_detection_llm = GroqLLMService(api_key=os.getenv("GROQ_API_KEY"))
 
+        # =================================
         # tools
-
+        # =================================
         ## terminate call
         terminate_call_function = FunctionSchema(
             name="terminate_call",
@@ -271,7 +278,7 @@ async def main(
                 # voicemail_detection_audio_collector,  # Collect audio frames
                 voicemail_detection_context_aggregator.user(),  # User spoken responses
                 voicemail_detection_llm,  # LLM
-                tts,  # TTS
+                tts,
                 transport.output(),  # Transport bot output
                 voicemail_detection_context_aggregator.assistant(),  # Assistant spoken responses and tool context
             ]
@@ -290,7 +297,6 @@ async def main(
         @transport.event_handler("on_joined")
         async def on_joined(transport, data):
             if not test_mode and dialout_settings:
-                print(f"_____bot.py * dialout_settings: {dialout_settings}")
                 logger.debug("Dialout settings detected; starting dialout")
                 await dailout_helper.start_dialout(transport, dialout_settings)
 
@@ -354,7 +360,7 @@ async def main(
                 stt,
                 human_conversation_context_aggregator.user(),  # User spoken responses
                 human_conversation_llm,  # LLM
-                tts,  # TTS
+                tts,
                 transport.output(),  # Transport bot output
                 human_conversation_context_aggregator.assistant(),  # Assistant spoken responses and tool context
             ]

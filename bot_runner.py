@@ -30,7 +30,7 @@ daily_api_key = os.getenv("DAILY_API_KEY", "")
 daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
 room_url = os.getenv("DAILY_SAMPLE_ROOM_URL", None)
 
-BOT_FILENAME = "voicemail_detection"
+# BOT_FILENAME = "voicemail_detection"
 BOT_FILENAME = "bot"
 
 daily_helpers = {}
@@ -145,7 +145,6 @@ if __name__ == "__main__":
     )
 
     config = parser.parse_args()
-    print(f"_____bot_runner.py * Pipecat Bot Runner config: {config}")
 
     try:
         import uvicorn
