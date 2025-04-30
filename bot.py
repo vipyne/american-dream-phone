@@ -14,7 +14,6 @@ import aiohttp
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 
-from call_connection_manager import CallConfigManager, SessionManager
 from dotenv import load_dotenv
 from loguru import logger
 
