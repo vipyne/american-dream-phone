@@ -30,12 +30,15 @@ daily_api_key = os.getenv("DAILY_API_KEY", "")
 daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
 room_url = os.getenv("DAILY_SAMPLE_ROOM_URL", None)
 
-BOT_FILENAME="voicemail_detection"
-BOT_FILENAME="bot"
+BOT_FILENAME = "voicemail_detection"
+BOT_FILENAME = "bot"
 
 daily_helpers = {}
 
-async def start_bot(room_details: Dict[str, str], body: Dict[str, Any], bot_filename: str) -> bool:
+
+async def start_bot(
+    room_details: Dict[str, str], body: Dict[str, Any], bot_filename: str
+) -> bool:
     """Start a bot process with the given configuration.
     Args:
         room_details: Room URL and token
@@ -47,14 +50,15 @@ async def start_bot(room_details: Dict[str, str], body: Dict[str, Any], bot_file
     token = room_details["token"]
 
     body_json = json.dumps(body).replace('"', '\\"')
-    print(f"++++ Body JSON: {body_json}")
 
     bot_proc = f'python3 -m {bot_filename} -u {room_url} -t {token} -b "{body_json}"'
     print(f"Starting bot. Room: {room_url}")
 
     try:
         command_parts = shlex.split(bot_proc)
-        subprocess.Popen(command_parts, bufsize=1, cwd=os.path.dirname(os.path.abspath(__file__)))
+        subprocess.Popen(
+            command_parts, bufsize=1, cwd=os.path.dirname(os.path.abspath(__file__))
+        )
         return True
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to start subprocess: {e}")
@@ -68,13 +72,10 @@ async def lifespan(app: FastAPI):
         daily_api_url=daily_api_url,
         aiohttp_session=aiohttp_session,
     )
-    blah = daily_helpers["rest"]
-    # print(f"_____bot_runner.py * daily_helpers[rest]: {blah}")
-    # print(f"_____bot_runner.py * dir(blah): {dir(blah)}")
-    # print(f"_____bot_runner.py * inspect.signature(blah.create_room): {inspect.signature(blah.create_room)}")
 
     yield
     await aiohttp_session.close()
+
 
 app = FastAPI(lifespan=lifespan)
 
@@ -86,6 +87,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.post("/start")
 async def handle_start_request(request: Request) -> JSONResponse:
     """Unified endpoint to handle bot configuration for different scenarios."""
@@ -93,23 +95,23 @@ async def handle_start_request(request: Request) -> JSONResponse:
     bot_filename = BOT_FILENAME
     room_url = os.getenv("DAILY_SAMPLE_ROOM_URL", None)
     if not room_url:
-        params = DailyRoomParams(properties={"start_video_off":True})
+        params = DailyRoomParams(properties={"start_video_off": True})
         room = await daily_helpers["rest"].create_room(params)
         # print(f"_<>____bot_runner.py * room: {room}")
         room_url = room.url
 
     try:
         data = await request.json()
-        
+
         # {'voicemail_detection': {'testInPrebuilt': True}}
-        body = data['config']
+        body = data["config"]
         token = await daily_helpers["rest"].get_token(room_url, MAX_SESSION_TIME)
         room_details = {"room_url": room_url, "token": token}
-        
+
         await start_bot(room_details, body, bot_filename)
 
         response = {"status": "Bot started", "bot_type": bot_filename}
-        
+
         # pstn (phone)
         if "dialout_settings" in body and len(body["dialout_settings"]) > 0:
             number = body["dialout_settings"][0]
@@ -125,17 +127,22 @@ async def handle_start_request(request: Request) -> JSONResponse:
         return JSONResponse(response)
 
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Request processing error: {str(e)}")
+        raise HTTPException(
+            status_code=400, detail=f"Request processing error: {str(e)}"
+        )
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser(description="Pipecat Bot Runner")
     parser.add_argument(
         "--host", type=str, default=os.getenv("HOST", "0.0.0.0"), help="Host address"
     )
-    parser.add_argument("--port", type=int, default=os.getenv("PORT", 7860), help="Port number")
-    parser.add_argument("--reload", action="store_true", default=True, help="Reload code on change")
+    parser.add_argument(
+        "--port", type=int, default=os.getenv("PORT", 7860), help="Port number"
+    )
+    parser.add_argument(
+        "--reload", action="store_true", default=True, help="Reload code on change"
+    )
 
     config = parser.parse_args()
     print(f"_____bot_runner.py * Pipecat Bot Runner config: {config}")
@@ -143,7 +150,9 @@ if __name__ == "__main__":
     try:
         import uvicorn
 
-        uvicorn.run("bot_runner:app", host=config.host, port=config.port, reload=config.reload)
+        uvicorn.run(
+            "bot_runner:app", host=config.host, port=config.port, reload=config.reload
+        )
 
     except KeyboardInterrupt:
         print("Pipecat runner shutting down...")

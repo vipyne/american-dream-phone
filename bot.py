@@ -7,7 +7,6 @@
 import argparse
 import asyncio
 import functools
-import json
 import os
 import sys
 import aiohttp
@@ -56,7 +55,7 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.mcp_service import MCPClient
 
-from bot_helper import UserAudioCollector
+from bot_helper import DialOutHelper, UserAudioCollector
 
 load_dotenv(override=True)
 
@@ -74,6 +73,18 @@ with open("prompts/human_conversation_system_instruction.txt", "r") as f:
     human_conversation_system_instruction = f.read()
 
 
+global call_is_over
+call_is_over = False
+
+
+def set_call_terminated():
+    global call_is_over
+    call_is_over = True
+
+
+def get_call_terminated() -> bool:
+    return call_is_over
+
 
 async def main(
     room_url: str,
@@ -81,14 +92,20 @@ async def main(
     body: dict,
 ):
     print(f"_____bot.py * main: {body}")
-    test_mode = json.loads(body)["testInPrebuilt"]
+    dailout_helper = DialOutHelper(body=body)
+    # json_body = json.loads(body)
+    # test_mode = json_body["testInPrebuilt"]
+    test_mode = dailout_helper.get_is_test_mode()
+    print(f"_____bot.py * test_mode: {test_mode}")
+
+    dialout_settings = dailout_helper.get_dialout_settings()
+    print(f"_____bot.py * dialout_settings: {dialout_settings}")
 
     async with aiohttp.ClientSession() as session:
-
         transport = DailyTransport(
             room_url,
             token,
-            "Voicemail Detection Bot",
+            "🇺🇸💭📞 American Dream Phone 🇺🇸💭📞",
             DailyParams(
                 api_url=daily_api_url,
                 api_key=daily_api_key,
@@ -97,8 +114,7 @@ async def main(
                 camera_out_enabled=False,
                 vad_analyzer=SileroVADAnalyzer(),
                 turn_analyzer=FalSmartTurnAnalyzer(
-                    api_key=os.getenv("FAL_SMART_TURN_API_KEY"),
-                    aiohttp_session=session
+                    api_key=os.getenv("FAL_SMART_TURN_API_KEY"), aiohttp_session=session
                 ),
             ),
         )
@@ -114,12 +130,12 @@ async def main(
         #     api_key=os.getenv("PLAYHT_API_KEY"),
         #     voice_url="s3://voice-cloning-zero-shot/5250872f-068a-4c17-827d-783f51319eec/vanessa-dream-02/manifest.json",
         #     params=PlayHTTTSService.InputParams(language=Language.EN),
-        # )    
+        # )
 
         stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
         human_conversation_llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
-        
+
         # human_conversation_llm = AnthropicLLMService(
         #     api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-7-sonnet-latest"
         # )
@@ -133,19 +149,19 @@ async def main(
 
         voicemail_detection_llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
-
         # tools
 
         ## terminate call
         terminate_call_function = FunctionSchema(
             name="terminate_call",
-            description="Call this function to terminate the call.",
+            description="Call this function to terminate the call. If the switch_to_voicemail_response function has been called, wait until that response is over.",
             properties={},
             required=[],
         )
+
         async def terminate_call_back(params: FunctionCallParams):
             await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
-        
+
         ## leave a message
         switch_to_voicemail_response = FunctionSchema(
             name="switch_to_voicemail_response",
@@ -153,11 +169,14 @@ async def main(
             properties={},
             required=[],
         )
+
         async def switch_to_voicemail_callback(params: FunctionCallParams):
             message = """You are a constituent of Orleans Parish (New Orleans, Louisiana) leaving a voicemail message for a political representative. 
             Say EXACTLY this message and then terminate the call:
             'Hi, My name is Vanessa and I am a resident of Orleens parish. I'm calling today to voice my concerns. Thank you.'"""
-            await result_callback(message)
+            await params.result_callback(message)
+            await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+            set_call_terminated()
 
         ## talk to a human
         switch_to_human_conversation_response = FunctionSchema(
@@ -166,22 +185,35 @@ async def main(
             properties={},
             required=[],
         )
+
         async def switch_to_human_conversation_callback(params: FunctionCallParams):
-            # this will end the voicemail_detection pipeline runner task
-            await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+            # this will stop the voicemail_detection pipeline runner task
+            await params.llm.push_frame(StopTaskFrame(), FrameDirection.UPSTREAM)
 
+        human_conversation_tools = ToolsSchema(standard_tools=[terminate_call_function])
 
-        tools = ToolsSchema(standard_tools=[terminate_call_function])
+        voicemail_detection_tools = ToolsSchema(
+            standard_tools=[
+                # terminate_call_function,
+                switch_to_voicemail_response,
+                switch_to_human_conversation_response,
+            ]
+        )
 
-        # both llms may have to terminate the call
+        # only the human llm needs terminate the call function
         human_conversation_llm.register_function("terminate_call", terminate_call_back)
-        voicemail_detection_llm.register_function("terminate_call", terminate_call_back)
-        
+        # voicemail_detection_llm.register_function("terminate_call", terminate_call_back)
+
         # only vm dectection llm needs to be able to leave a message
-        voicemail_detection_llm.register_function("switch_to_voicemail_response", switch_to_voicemail_callback)
-        
+        voicemail_detection_llm.register_function(
+            "switch_to_voicemail_response", switch_to_voicemail_callback
+        )
+
         # only vm dectection llm needs to be able to swith to human convo
-        voicemail_detection_llm.register_function("switch_to_human_conversation_response", switch_to_human_conversation_callback)
+        voicemail_detection_llm.register_function(
+            "switch_to_human_conversation_response",
+            switch_to_human_conversation_callback,
+        )
 
         # mcp.run tools (fetch)
         try:
@@ -192,26 +224,43 @@ async def main(
 
         mcp_tools = await mcp.register_tools(human_conversation_llm)
 
-        all_standard_tools = mcp_tools.standard_tools + tools.standard_tools
-        all_tools = ToolsSchema(standard_tools=all_standard_tools)
-
+        # combine local functions and mcp.run functions
+        human_conversation_all_standard_tools = (
+            mcp_tools.standard_tools + human_conversation_tools.standard_tools
+        )
+        human_conversation_all_tools = ToolsSchema(
+            standard_tools=human_conversation_all_standard_tools
+        )
 
         # human convo aggregator
-        human_conversation_messages = [{"role": "system", "content": human_conversation_system_instruction}]
-        human_conversation_context = OpenAILLMContext(human_conversation_messages, all_tools)
-
-        human_conversation_context_aggregator = human_conversation_llm.create_context_aggregator(
-            human_conversation_context
+        human_conversation_messages = [
+            {"role": "system", "content": human_conversation_system_instruction}
+        ]
+        human_conversation_context = OpenAILLMContext(
+            human_conversation_messages, human_conversation_all_tools
+        )
+        human_conversation_context_aggregator = (
+            human_conversation_llm.create_context_aggregator(human_conversation_context)
         )
 
         # voicemail aggregator
-        voicemail_detection_messages = [{"role": "system", "content": voicemail_detection_system_instruction}]
-        voicemail_detection_context = OpenAILLMContext(voicemail_detection_messages, all_tools)
-
-        voicemail_detection_context_aggregator = voicemail_detection_llm.create_context_aggregator(
-            voicemail_detection_context
+        voicemail_detection_messages = [
+            {"role": "system", "content": voicemail_detection_system_instruction}
+        ]
+        # only add local functions to voicemail_detection
+        voicemail_detection_context = OpenAILLMContext(
+            voicemail_detection_messages, voicemail_detection_tools
+        )
+        voicemail_detection_context_aggregator = (
+            voicemail_detection_llm.create_context_aggregator(
+                voicemail_detection_context
+            )
         )
 
+        # Set up audio collector for handling audio input
+        voicemail_detection_audio_collector = UserAudioCollector(
+            voicemail_detection_context, voicemail_detection_context_aggregator.user()
+        )
 
         # =================================
         # voicemail_detection_pipeline
@@ -221,7 +270,6 @@ async def main(
                 transport.input(),  # Transport user input
                 stt,
                 # voicemail_detection_audio_collector,  # Collect audio frames
-                
                 voicemail_detection_context_aggregator.user(),  # User spoken responses
                 voicemail_detection_llm,  # LLM
                 tts,  # TTS
@@ -234,11 +282,69 @@ async def main(
             voicemail_detection_pipeline,
             params=PipelineParams(
                 allow_interruptions=True,
-                enable_metrics=True,
+                # enable_metrics=True,
             ),
         )
         # =================================
 
+        # event handlers
+        @transport.event_handler("on_joined")
+        async def on_joined(transport, data):
+            if not test_mode and dialout_settings:
+                print(f"_____bot.py * dialout_settings: {dialout_settings}")
+                logger.debug("Dialout settings detected; starting dialout")
+                await dailout_helper.start_dialout(transport, dialout_settings)
+
+        @transport.event_handler("on_dialout_connected")
+        async def on_dialout_connected(transport, data):
+            logger.debug(f"Dial-out connected: {data}")
+
+        @transport.event_handler("on_dialout_answered")
+        async def on_dialout_answered(transport, data):
+            logger.debug(f"Dial-out answered: {data}")
+            await transport.capture_participant_transcription(data["sessionId"])
+
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
+            logger.debug(f"First participant joined: {participant['id']}")
+            if test_mode:
+                await transport.capture_participant_transcription(participant["id"])
+
+        @transport.event_handler("on_participant_left")
+        async def on_participant_left(transport, participant, reason):
+            await voicemail_detection_task.queue_frame(EndFrame())
+
+        # =================================
+        # runner
+        # =================================
+        # runner = PipelineRunner(force_gc=True)
+        runner = PipelineRunner()
+        # =================================
+
+        # =================================
+        # voicemail_detection_task
+        # =================================
+        # Run the voicemail_detection pipeline
+        try:
+            print("!!! starting voicemail_detection pipeline ☎️")
+            await runner.run(voicemail_detection_task)
+        except Exception as e:
+            logger.error(f"☎️ Error in voicemail_detection pipeline: {e}")
+            import traceback
+
+            logger.error(traceback.format_exc())
+
+        print("!!! Done with voicemail_detection pipeline ☎️")
+        # =================================
+        # =================================
+        # =================================
+        # =================================
+
+        # did we leave a voice mail ? thenthe call is over
+        terminated = get_call_terminated()
+        if terminated:
+            return
+        # else, talk to the human
 
         # =================================
         # human_conversation_pipeline
@@ -259,68 +365,22 @@ async def main(
             human_conversation_pipeline,
             params=PipelineParams(
                 allow_interruptions=True,
-                enable_metrics=True,
+                # enable_metrics=True,
             ),
         )
         # =================================
 
-        # event handlers
-        @transport.event_handler("on_joined")
-        async def on_joined(transport, data):
-            if not test_mode and dialout_settings:
-                logger.debug("Dialout settings detected; starting dialout")
-                await call_config_manager.start_dialout(transport, dialout_settings)
-
-        @transport.event_handler("on_dialout_connected")
-        async def on_dialout_connected(transport, data):
-            logger.debug(f"Dial-out connected: {data}")
-
-        @transport.event_handler("on_dialout_answered")
-        async def on_dialout_answered(transport, data):
-            logger.debug(f"Dial-out answered: {data}")
-            await transport.capture_participant_transcription(data["sessionId"])
-
-        @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
-            logger.debug(f"First participant joined: {participant['id']}")
-            if test_mode:
-                await transport.capture_participant_transcription(participant["id"])
-
+        # update the participant left handler to end both tasks
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
             await voicemail_detection_task.queue_frame(EndFrame())
             await human_conversation_task.queue_frame(EndFrame())
 
-
-        # =================================
-        # runner
-        # =================================
-        runner = PipelineRunner(handle_sigint=True)
-        # runner = PipelineRunner()
-        # =================================
-        
-
-        # # =================================
-        # # voicemail_detection_task
-        # # =================================
-        # # Run the voicemail_detection pipeline
-        # try:
-        #     print("!!! starting voicemail_detection pipeline ☎️")
-        #     await runner.run(voicemail_detection_task)
-        # except Exception as e:
-        #     logger.error(f"☎️ Error in voicemail_detection pipeline: {e}")
-        #     import traceback
-
-        #     logger.error(traceback.format_exc())
-
-        # print("!!! Done with voicemail_detection pipeline ☎️")
-        # # =================================
-
-
         # =================================
         # human_conversation_task
         # =================================
         # Run the human conversation pipeline
+
         try:
             print("!!! starting human_conversation pipeline 👾")
             await runner.run(human_conversation_task)
@@ -331,6 +391,9 @@ async def main(
             logger.error(traceback.format_exc())
 
         print("!!! Done with human_conversation pipeline 👾")
+
+        # else:
+        #     await runner.cancel()
         # =================================
 
 
@@ -347,10 +410,3 @@ if __name__ == "__main__":
     logger.info(f"Body provided: {bool(args.body)}")
 
     asyncio.run(main(args.url, args.token, args.body))
-
-
-
-
-
-
-
