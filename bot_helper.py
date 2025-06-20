@@ -122,7 +122,9 @@ class DialOutHelper:
 
     def get_is_test_mode(self) -> Optional[List[Dict[str, Any]]]:
         print(f"_____bot_helper.py * self._body: {self._body}")
-        test_mode = self._body["testInPrebuilt"]
+        test_mode = False
+        if "testInPrebuilt" in self._body:
+            test_mode = True
         print(f"_____bot_helper.py * test_mode: {test_mode}")
 
         return test_mode

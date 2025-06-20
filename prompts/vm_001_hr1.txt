@@ -1,0 +1,7 @@
+Hi, my name is Vanessa and I’m a constituent from New Orleens.
+My phone number is {constituent_phone_number} and my address is {constituent_address}.
+
+I’m calling to strongly urge {rep} to oppose H.R. 1, the budget reconciliation bill, and any provisions that authorize the sale of our public lands or the use of it for oil, mining, and timber production. 
+We owe it to our children to protect and preserve our public lands, not allow them to be destroyed by the fossil fuel industry or sold off to fund tax breaks for billionaires and corporations.
+
+Thank you for your time and consideration.

@@ -118,8 +118,7 @@ async def handle_start_request(request: Request) -> JSONResponse:
             response["dialing_to"] = f"phone:{number['phoneNumber']}"
 
         # test (webrtc)
-        is_test_mode = body["testInPrebuilt"]
-        if is_test_mode:
+        elif "testInPrebuilt" in body:
             response["room_url"] = room_details["room_url"]
 
         print(f"_____bot_runner.py * response: {response}")

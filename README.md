@@ -55,8 +55,8 @@ curl -X POST "http://localhost:7860/start" \
 -d '{
   "config": {
     "dialout_settings": [{
-        "phoneNumber": "+15551234567",
-      }],
+        "phoneNumber": "+15551234567"
+      }]
     }
  }'
 ==>
@@ -82,6 +82,11 @@ By using pipecat, all services (transport, LLM, STT, and TTS) are all changeable
 - MCP server for fetch
 	- mcp.run - [`"mcp.run"`](https://www.mcp.run/)
 	- Connect as many MCP servers as you like...
+
+## TODO list / notes to self / ideas / creedthoughts
+
+- use some API to get rep phone numbers like https://5calls.org/representatives-api/ (maybe an MCP around this?)
+- call before or after hours to focus on leaving messages; less on voicemail detection.
 
 ## credits
 
