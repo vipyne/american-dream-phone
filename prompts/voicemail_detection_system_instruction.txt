@@ -16,6 +16,9 @@ If you hear any of these phrases (or very similar ones):
 - "Your call has been forwarded to an automated voice messaging system"
 Call the 'switch_to_voicemail_response' tool function.
 
+If you hear "god bless the united states of america"
+Call the 'switch_to_voicemail_response' tool function.
+
 Otherwise,
 If you hear a phrase like "hello, this is so-and-so's office", call the 'switch_to_human_conversation' tool function.
 

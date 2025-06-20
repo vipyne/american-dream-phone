@@ -66,6 +66,7 @@ daily_api_key = os.getenv("DAILY_API_KEY", "")
 daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
 
 prompt_substitution_data = {
+    "constituent_name": "Vanessa",
     "rep": "Senator Bill Cassidy",
     "constituent_address": os.getenv("CONSTITUENT_ADDRESS"),
     "constituent_phone_number": os.getenv("CONSTITUENT_PHONE_NUMBER"),
@@ -74,8 +75,10 @@ temp = ""
 # Load system instructions from text files
 with open("prompts/vm_001_hr1.txt", "r") as f:
     temp = f.read()
-voicemail_detection_system_instruction = temp.format(**prompt_substitution_data)
-print(f"_____bot.py * voicemail_detection_system_instruction: {voicemail_detection_system_instruction}")
+voicemail_message = temp.format(**prompt_substitution_data)
+
+with open("prompts/voicemail_detection_system_instruction.txt", "r") as f:
+    voicemail_detection_system_instruction = f.read()
 
 with open("prompts/human_conversation_system_instruction.txt", "r") as f:
     human_conversation_system_instruction = f.read()
@@ -124,19 +127,19 @@ async def main(
             ),
         )
 
-        # test voice
-        tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY", ""),
-            voice_id="b7d50908-b17c-442d-ad8d-810c63997ed9",  # Helpful Woman
-        )
-
-        # ## vanessa's voice
-        # tts = PlayHTTTSService(
-        #     user_id=os.getenv("PLAYHT_USER_ID"),
-        #     api_key=os.getenv("PLAYHT_API_KEY"),
-        #     voice_url="s3://voice-cloning-zero-shot/5250872f-068a-4c17-827d-783f51319eec/vanessa-dream-02/manifest.json",
-        #     params=PlayHTTTSService.InputParams(language=Language.EN),
+        # # test voice
+        # tts = CartesiaTTSService(
+        #     api_key=os.getenv("CARTESIA_API_KEY", ""),
+        #     voice_id="b7d50908-b17c-442d-ad8d-810c63997ed9",  # Helpful Woman
         # )
+
+        ## vanessa's voice
+        tts = PlayHTTTSService(
+            user_id=os.getenv("PLAYHT_USER_ID"),
+            api_key=os.getenv("PLAYHT_API_KEY"),
+            voice_url="s3://voice-cloning-zero-shot/5250872f-068a-4c17-827d-783f51319eec/vanessa-dream-02/manifest.json",
+            params=PlayHTTTSService.InputParams(language=Language.EN),
+        )
 
         stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
@@ -186,10 +189,9 @@ async def main(
 
         async def switch_to_voicemail_callback(params: FunctionCallParams):
             print(f"_____bot.py * : switch_to_voicemail_callback")
-            # 'Hi, My name is Vanessa and I am a resident of Orleens parish. I'm calling today to voice my concerns. Thank you.'"""
             message = f"""You are a constituent of Orleans Parish (New Orleans, Louisiana) leaving a voicemail message for a political representative. 
-            Say EXACTLY this message and then terminate the call:
-            '{voicemail_detection_system_instruction}'"""
+            ONLY say this message:
+            '{voicemail_message}'"""
             await params.result_callback(message)
             await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
             set_call_terminated()
@@ -360,6 +362,7 @@ async def main(
         terminated = get_call_terminated()
         print(f"_____bot.py * terminated: {terminated}")
         if terminated:
+            await runner.cancel()
             return
         # else, talk to the human
 
