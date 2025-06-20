@@ -4,9 +4,11 @@
 
 > Democracy dies in silence
 
+See a demo of it in action [here](https://www.loom.com/share/ce0e8051e8cb430285a137ef290f0364).
+
 
 The first thing you need to know is that in the 90's, there was a board game called [Dream Phone](https://consolemods.org/wiki/Dreamphone). This is a real thing that exists.
-With that whimsy in mind, `American Dream Phone` is a Voice AI Agent [Pipecat](https://github.com/pipecat-ai/pipecat) app to call your representatives. Revenge of the robo-calls. But also, civic engagement. Yay.
+With that whimsy in mind, `American Dream Phone` is a [Pipecat](https://github.com/pipecat-ai/pipecat) AI Voice Agent to help you call your political representatives. Some may call it 'revenge of the robo-calls', I call it civic engagement.
 
 ## dependencies
 
@@ -55,14 +57,14 @@ curl -X POST "http://localhost:7860/start" \
 -d '{
   "config": {
     "dialout_settings": [{
-        "phoneNumber": "+15551234567",
-      }],
+        "phoneNumber": "+15551234567"
+      }]
     }
  }'
 ==>
 {"status":"Bot started","bot_type":"bot","dialing_to":"phone:+15551234567"}
 ```
-This actually calls the phone number.
+This actually calls the phone number. (Debug pro tip- stay in the daily room and listen in on the conversation.)
 
 ## services
 By using pipecat, all services (transport, LLM, STT, and TTS) are all changeable. These are just the ones I started with.
@@ -82,6 +84,10 @@ By using pipecat, all services (transport, LLM, STT, and TTS) are all changeable
 - MCP server for fetch
 	- mcp.run - [`"mcp.run"`](https://www.mcp.run/)
 	- Connect as many MCP servers as you like...
+
+## TODO list / notes to self / ideas / creedthoughts
+
+- use some API to auto get representative phone numbers like https://5calls.org/representatives-api/ (maybe an MCP around this?)
 
 ## credits
 
