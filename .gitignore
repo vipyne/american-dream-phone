@@ -5,6 +5,8 @@ __pycache__
 resources/*
 !resources/resources.txt
 
+.ruff_cache
+
 # local pipecat-ai module copy for hacking
 pipecat
 
