@@ -68,6 +68,23 @@ By using pipecat, all services (transport, LLM, STT, and TTS) are all changeable
 - TTS
 	- [`Cartesia`](https://play.cartesia.ai/keys)
 
+## testing
+
+With the bot server running (`uv run python bot.py -t daily`), use the test harness:
+
+```bash
+# Browser test — talk to the bot directly, verify IVR detection + conversation
+./test_calls.sh webrtc
+
+# Phone test — calls TEST_PHONE_NUMBER, verify IVR nav + voicemail/human routing
+TEST_PHONE_NUMBER=+15551234567 ./test_calls.sh dialout
+
+# Run both
+TEST_PHONE_NUMBER=+15551234567 ./test_calls.sh all
+```
+
+Each test starts a session and returns a Daily room URL. Open it in your browser to watch both the bot and telephony participant in real time.
+
 ## TODO list / notes to self / ideas / creedthoughts
 
 - use some API to auto get representative phone numbers like https://5calls.org/representatives-api/ (maybe an MCP around this?)
