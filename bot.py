@@ -16,13 +16,13 @@ Then start a test session::
 
     curl -X POST http://localhost:7860/start \\
       -H "Content-Type: application/json" \\
-      -d '{"body": {"testInPrebuilt": true}}'
+      -d '{"createDailyRoom": true, "body": {"testInPrebuilt": true}}'
 
 Or start a dialout session::
 
     curl -X POST http://localhost:7860/start \\
       -H "Content-Type: application/json" \\
-      -d '{"body": {"dialout_settings": [{"phoneNumber": "+1XXXXXXXXXX"}]}}'
+      -d '{"createDailyRoom": true, "dailyRoomProperties": {"enable_dialout": true}, "body": {"dialout_settings": [{"phoneNumber": "+1XXXXXXXXXX"}]}}'
 """
 
 import os
@@ -38,7 +38,8 @@ from pipecat.extensions.ivr.ivr_navigator import IVRNavigator
 from pipecat.frames.frames import (
     EndFrame,
     EndTaskFrame,
-    StopTaskFrame,
+    Frame,
+    LLMMessagesUpdateFrame,
     TextFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
@@ -49,7 +50,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import DailyRunnerArguments, RunnerArguments
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -59,6 +60,17 @@ from pipecat.transports.base_transport import BaseTransport
 from pipecat.transports.daily.transport import DailyParams, DailyTransport
 
 load_dotenv(override=True)
+
+
+class EmptyTextFilter(FrameProcessor):
+    """Drops empty or whitespace-only TextFrames before they reach TTS."""
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, TextFrame) and not frame.text.strip():
+            return
+        await self.push_frame(frame, direction)
+
 
 prompt_substitution_data = {
     "constituent_name": "Vanessa",
@@ -129,15 +141,17 @@ async def run_bot(
     handle_sigint: bool,
     body: dict,
 ) -> None:
-    """Run the bot with IVR navigation and human conversation pipelines."""
+    """Run the bot with a single pipeline.
+
+    Uses IVRNavigator for initial classification and IVR navigation.
+    When a human is detected, swaps the LLM prompt to conversation mode inline.
+    When voicemail is detected, leaves a message and ends.
+    """
 
     dialout_settings = get_dialout_settings(body)
     test_mode = "testInPrebuilt" in body
 
     logger.info(f"test_mode: {test_mode}, dialout_settings: {dialout_settings}")
-
-    # Track whether the call ended during IVR (voicemail left)
-    call_ended = False
 
     # =================================
     # Services
@@ -151,7 +165,7 @@ async def run_bot(
         ),
     )
 
-    ivr_llm = AnthropicLLMService(
+    llm = AnthropicLLMService(
         api_key=os.getenv("ANTHROPIC_API_KEY"),
         settings=AnthropicLLMService.Settings(
             model="claude-sonnet-4-6",
@@ -159,39 +173,57 @@ async def run_bot(
     )
 
     # =================================
-    # IVR Navigator
+    # Tools (available throughout the call)
+    # =================================
+    terminate_call_function = FunctionSchema(
+        name="terminate_call",
+        description="Call this function to terminate the call.",
+        properties={},
+        required=[],
+    )
+
+    async def terminate_call_back(params: FunctionCallParams):
+        await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+
+    llm.register_function("terminate_call", terminate_call_back)
+
+    tools = ToolsSchema(standard_tools=[terminate_call_function])
+
+    # =================================
+    # IVR Navigator (uses the same LLM)
     # =================================
     ivr_navigator = IVRNavigator(
-        llm=ivr_llm,
+        llm=llm,
         ivr_prompt="You are calling a political representative's office. Your goal is to speak with someone about a constituent's concerns. If asked to press a button or make a selection, choose the option to speak with a representative or leave a message.",
     )
 
-    # IVR context + aggregators (VAD lives here now)
-    ivr_context = LLMContext()
-    ivr_user_aggregator, ivr_assistant_aggregator = LLMContextAggregatorPair(
-        ivr_context,
+    # Context + aggregators
+    context = LLMContext(tools=tools)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(),
         ),
     )
 
     # =================================
-    # IVR Pipeline
+    # Single Pipeline
     # =================================
-    ivr_pipeline = Pipeline(
+    pipeline = Pipeline(
         [
             transport.input(),
             stt,
-            ivr_user_aggregator,
+            user_aggregator,
             ivr_navigator,
+            EmptyTextFilter(),
             tts,
             transport.output(),
-            ivr_assistant_aggregator,
+            assistant_aggregator,
         ]
     )
 
-    ivr_task = PipelineTask(
-        ivr_pipeline,
+    task = PipelineTask(
+        pipeline,
         params=PipelineParams(allow_interruptions=True),
     )
 
@@ -199,19 +231,23 @@ async def run_bot(
     # IVR Event: conversation detected
     # =================================
     async def on_conversation_detected(processor, conversation_history):
-        nonlocal call_ended
         logger.info(f"Conversation detected. History: {conversation_history}")
 
         is_voicemail = check_for_voicemail(conversation_history)
 
         if is_voicemail:
             logger.info("Voicemail detected — leaving message")
-            call_ended = True
             await processor.push_frame(TextFrame(text=voicemail_message))
             await processor.push_frame(EndFrame())
         else:
-            logger.info("Human detected — switching to conversation pipeline")
-            await ivr_task.queue_frame(StopTaskFrame())
+            # Swap to human conversation prompt, keeping conversation history
+            logger.info("Human detected — switching to conversation mode")
+            messages = [
+                {"role": "system", "content": human_conversation_system_instruction}
+            ]
+            messages.extend(conversation_history)
+            update = LLMMessagesUpdateFrame(messages=messages, run_llm=True)
+            await processor.push_frame(update, FrameDirection.UPSTREAM)
 
     ivr_navigator.add_event_handler("on_conversation_detected", on_conversation_detected)
 
@@ -246,96 +282,14 @@ async def run_bot(
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
-        await ivr_task.queue_frame(EndFrame())
+        logger.debug(f"Participant left: {participant}, reason: {reason}")
+        await task.cancel()
 
     # =================================
-    # Run IVR pipeline
+    # Run
     # =================================
     runner = PipelineRunner(handle_sigint=handle_sigint)
-
-    try:
-        logger.info("Starting IVR navigator pipeline")
-        await runner.run(ivr_task)
-    except Exception as e:
-        logger.error(f"Error in IVR pipeline: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-
-    logger.info("Done with IVR navigator pipeline")
-
-    # =================================
-    # If voicemail was left, we're done
-    # =================================
-    if call_ended:
-        logger.info("Voicemail left, call is over")
-        return
-
-    # =================================
-    # Human conversation pipeline
-    # =================================
-    conversation_llm = AnthropicLLMService(
-        api_key=os.getenv("ANTHROPIC_API_KEY"),
-        settings=AnthropicLLMService.Settings(
-            model="claude-sonnet-4-6",
-        ),
-    )
-
-    # Tools
-    terminate_call_function = FunctionSchema(
-        name="terminate_call",
-        description="Call this function to terminate the call.",
-        properties={},
-        required=[],
-    )
-
-    async def terminate_call_back(params: FunctionCallParams):
-        await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
-
-    conversation_llm.register_function("terminate_call", terminate_call_back)
-
-    tools = ToolsSchema(standard_tools=[terminate_call_function])
-
-    # Context + aggregators
-    messages = [{"role": "system", "content": human_conversation_system_instruction}]
-    context = LLMContext(messages=messages, tools=tools)
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-        context,
-        user_params=LLMUserAggregatorParams(
-            vad_analyzer=SileroVADAnalyzer(),
-        ),
-    )
-
-    # Pipeline
-    human_conversation_pipeline = Pipeline(
-        [
-            transport.input(),
-            stt,
-            user_aggregator,
-            conversation_llm,
-            tts,
-            transport.output(),
-            assistant_aggregator,
-        ]
-    )
-
-    human_conversation_task = PipelineTask(
-        human_conversation_pipeline,
-        params=PipelineParams(allow_interruptions=True),
-    )
-
-    @transport.event_handler("on_participant_left")
-    async def on_participant_left(transport, participant, reason):
-        await human_conversation_task.queue_frame(EndFrame())
-
-    try:
-        logger.info("Starting human conversation pipeline")
-        await runner.run(human_conversation_task)
-    except Exception as e:
-        logger.error(f"Error in human conversation pipeline: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-
-    logger.info("Done with human conversation pipeline")
+    await runner.run(task)
 
 
 async def bot(runner_args: RunnerArguments):

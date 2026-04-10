@@ -49,7 +49,7 @@ The response includes a `dailyRoom` URL. Open it in your browser to talk to and 
 ```bash
 curl -X POST http://localhost:7860/start \
   -H "Content-Type: application/json" \
-  -d '{"createDailyRoom": true, "body": {"dialout_settings": [{"phoneNumber": "+15551234567"}]}}'
+  -d '{"createDailyRoom": true, "dailyRoomProperties": {"enable_dialout": true}, "body": {"dialout_settings": [{"phoneNumber": "+15551234567"}]}}'
 ```
 This actually calls the phone number. (Debug pro tip — open the `dailyRoom` URL and listen in on the conversation.)
 

@@ -101,7 +101,7 @@ test_dialout() {
 
     RESPONSE=$(curl -s -X POST "$BOT_URL/start" \
         -H "Content-Type: application/json" \
-        -d "{\"createDailyRoom\": true, \"body\": {\"dialout_settings\": [{\"phoneNumber\": \"$TEST_PHONE_NUMBER\"}]}}")
+        -d "{\"createDailyRoom\": true, \"dailyRoomProperties\": {\"enable_dialout\": true}, \"body\": {\"dialout_settings\": [{\"phoneNumber\": \"$TEST_PHONE_NUMBER\"}]}}")
 
     echo "$RESPONSE" | python3 -m json.tool 2>/dev/null || echo "$RESPONSE"
 
