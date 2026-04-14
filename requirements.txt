@@ -1,6 +1,5 @@
-pipecat-ai[daily,cartesia,playht,openai,deepgram,google,silero,anthropic,mcp]
+pipecat-ai[daily,cartesia,openai,deepgram,silero,anthropic]>=0.0.107
 fastapi==0.115.6
 uvicorn
 python-dotenv
-twilio
 python-multipart

@@ -1,0 +1,12 @@
+[project]
+name = "american-dream-phone"
+version = "0.1.0"
+description = "AI-powered constituent phone call bot"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "pipecat-ai[daily,cartesia,openai,deepgram,silero,anthropic]>=0.0.107",
+    "fastapi==0.115.6",
+    "uvicorn",
+    "python-dotenv",
+    "python-multipart",
+]
