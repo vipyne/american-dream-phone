@@ -85,10 +85,23 @@ VOICEMAIL_INDICATORS = [
     "record your message",
     "you have reached voicemail",
     "is unavailable",
+    "is not available",
     "the person you are trying to reach",
     "the number you have dialed",
     "voice messaging system",
+    "voicemail",
+    "voice mail",
+    "mailbox is full",
+    "not in the office",
+    "out of the office",
+    "currently closed",
+    "office is closed",
+    "office hours",
+    "call back",
+    "call us back",
+    "please try again",
     "god bless the united states",
+    "beep",
 ]
 
 
@@ -185,7 +198,9 @@ async def run_bot(
     # =================================
     ivr_navigator = IVRNavigator(
         llm=llm,
-        ivr_prompt="You are calling a political representative's office. Your goal is to speak with someone about a constituent's concerns. If asked to press a button or make a selection, choose the option to speak with a representative or leave a message.",
+        ivr_prompt="""You are calling a political representative's office. Your goal is to speak with someone about a constituent's concerns. If asked to press a button or make a selection, choose the option to speak with a representative or leave a message.
+
+VOICEMAIL DETECTION: If you hear any voicemail indicators such as "leave a message", "after the beep", "after the tone", "no one is available", "voicemail", "is unavailable", "office is closed", "office hours", "call back later", or similar — immediately respond with <mode>conversation</mode> to switch to message-leaving mode. Do NOT try to navigate voicemail as an IVR menu.""",
     )
 
     # Context + aggregators
@@ -227,9 +242,12 @@ async def run_bot(
         is_voicemail = check_for_voicemail(conversation_history)
 
         if is_voicemail:
-            logger.info("Voicemail detected — leaving message")
-            await task.queue_frame(TextFrame(text=voicemail_message))
-            await task.queue_frame(EndFrame())
+            logger.info("Voicemail detected — leaving message directly via TTS")
+            # Use processor.push_frame to send text downstream directly to TTS,
+            # bypassing the LLM (task.queue_frame would route through the LLM
+            # which would "describe" the message instead of speaking it).
+            await processor.push_frame(TextFrame(text=voicemail_message))
+            await processor.push_frame(EndFrame())
         else:
             logger.info("Human detected — switching to conversation mode")
             messages = [
