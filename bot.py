@@ -34,13 +34,14 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.extensions.ivr.ivr_navigator import IVRNavigator
+from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.extensions.ivr.ivr_navigator import IVRNavigator, IVRStatus
 from pipecat.frames.frames import (
     EndFrame,
     EndTaskFrame,
-    Frame,
     LLMMessagesUpdateFrame,
     TextFrame,
+    VADParamsUpdateFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -50,7 +51,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import DailyRunnerArguments, RunnerArguments
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -60,16 +61,6 @@ from pipecat.transports.base_transport import BaseTransport
 from pipecat.transports.daily.transport import DailyParams, DailyTransport
 
 load_dotenv(override=True)
-
-
-class EmptyTextFilter(FrameProcessor):
-    """Drops empty or whitespace-only TextFrames before they reach TTS."""
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-        if isinstance(frame, TextFrame) and not frame.text.strip():
-            return
-        await self.push_frame(frame, direction)
 
 
 prompt_substitution_data = {
@@ -215,7 +206,6 @@ async def run_bot(
             stt,
             user_aggregator,
             ivr_navigator,
-            EmptyTextFilter(),
             tts,
             transport.output(),
             assistant_aggregator,
@@ -230,6 +220,7 @@ async def run_bot(
     # =================================
     # IVR Event: conversation detected
     # =================================
+    @ivr_navigator.event_handler("on_conversation_detected")
     async def on_conversation_detected(processor, conversation_history):
         logger.info(f"Conversation detected. History: {conversation_history}")
 
@@ -237,33 +228,54 @@ async def run_bot(
 
         if is_voicemail:
             logger.info("Voicemail detected — leaving message")
-            await processor.push_frame(TextFrame(text=voicemail_message))
-            await processor.push_frame(EndFrame())
+            await task.queue_frame(TextFrame(text=voicemail_message))
+            await task.queue_frame(EndFrame())
         else:
-            # Swap to human conversation prompt, keeping conversation history
             logger.info("Human detected — switching to conversation mode")
             messages = [
                 {"role": "system", "content": human_conversation_system_instruction}
             ]
-            messages.extend(conversation_history)
-            update = LLMMessagesUpdateFrame(messages=messages, run_llm=True)
-            await processor.push_frame(update, FrameDirection.UPSTREAM)
+            if conversation_history:
+                messages.extend(conversation_history)
+            await task.queue_frame(
+                LLMMessagesUpdateFrame(messages=messages, run_llm=True)
+            )
+            # Reduce VAD stop_secs for natural conversation flow
+            await task.queue_frame(
+                VADParamsUpdateFrame(params=VADParams(stop_secs=0.8))
+            )
 
-    ivr_navigator.add_event_handler("on_conversation_detected", on_conversation_detected)
-
+    @ivr_navigator.event_handler("on_ivr_status_changed")
     async def on_ivr_status_changed(processor, status):
         logger.info(f"IVR status changed: {status}")
-
-    ivr_navigator.add_event_handler("on_ivr_status_changed", on_ivr_status_changed)
+        if status == IVRStatus.COMPLETED:
+            logger.info("IVR navigation completed successfully")
+        elif status == IVRStatus.STUCK:
+            logger.warning("IVR navigation stuck — ending call")
+            await task.queue_frame(EndFrame())
 
     # =================================
-    # Transport events
+    # Transport events + dialout retry
     # =================================
+    max_retries = 5
+    retry_count = 0
+    dialout_successful = False
+
+    async def attempt_dialout(transport, dialout_settings: List[Dict[str, Any]]):
+        nonlocal retry_count, dialout_successful
+        if retry_count < max_retries and not dialout_successful:
+            retry_count += 1
+            logger.info(f"Attempting dialout (attempt {retry_count}/{max_retries})")
+            await start_dialout(transport, dialout_settings)
+        else:
+            logger.error(f"Maximum retry attempts ({max_retries}) reached.")
+            await task.cancel()
+
     @transport.event_handler("on_joined")
     async def on_joined(transport, data):
         if dialout_settings:
             logger.debug("Dialout settings detected; starting dialout")
-            await start_dialout(transport, dialout_settings)
+            await attempt_dialout(transport, dialout_settings)
 
     @transport.event_handler("on_dialout_connected")
     async def on_dialout_connected(transport, data):
@@ -271,8 +283,20 @@ async def run_bot(
 
     @transport.event_handler("on_dialout_answered")
     async def on_dialout_answered(transport, data):
+        nonlocal dialout_successful
         logger.debug(f"Dial-out answered: {data}")
+        dialout_successful = True
         await transport.capture_participant_transcription(data["sessionId"])
+
+    @transport.event_handler("on_dialout_error")
+    async def on_dialout_error(transport, data: Any):
+        logger.error(f"Dial-out error (attempt {retry_count}/{max_retries}): {data}")
+        if retry_count < max_retries and dialout_settings:
+            logger.info("Retrying dialout")
+            await attempt_dialout(transport, dialout_settings)
+        else:
+            logger.error(f"All {max_retries} dialout attempts failed. Stopping bot.")
+            await task.cancel()
 
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):
