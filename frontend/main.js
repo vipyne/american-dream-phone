@@ -7,20 +7,27 @@ import { DailyTransport } from "@pipecat-ai/daily-transport";
 let REPRESENTATIVES = [];
 
 // ---------------------------------------------------------------------------
+// Config (loaded from API)
+// ---------------------------------------------------------------------------
+let CONFIG = {
+  demo_mode: true,
+  voice_cloning_enabled: false,
+  max_calls_per_day: 2,
+  calls_remaining: 2,
+  max_call_duration_secs: 300,
+};
+
+// ---------------------------------------------------------------------------
 // Phone number normalization
 // ---------------------------------------------------------------------------
 function normalizePhone(raw) {
-  // Strip everything except digits
   const digits = raw.replace(/\D/g, "");
-  // If it already starts with 1 and is 11 digits, just prepend +
   if (digits.length === 11 && digits.startsWith("1")) {
     return "+" + digits;
   }
-  // If it's 10 digits (no country code), prepend +1
   if (digits.length === 10) {
     return "+1" + digits;
   }
-  // Return as-is with + prefix if it looks intentional
   return "+" + digits;
 }
 
@@ -42,9 +49,59 @@ const messageEl = document.getElementById("message");
 const recordBtn = document.getElementById("record-btn");
 const recordStatus = document.getElementById("record-status");
 const previewBtn = document.getElementById("preview-btn");
+const limitPanel = document.getElementById("limit-panel");
 
 // ---------------------------------------------------------------------------
-// Populate rep dropdown (from API)
+// State
+// ---------------------------------------------------------------------------
+let pcClient = null;
+let isMuted = true;
+let previewPassed = false; // Must preview before calling
+
+// Recording state
+let mediaRecorder = null;
+let recordedChunks = [];
+let recognition = null;
+let isRecording = false;
+
+// Dev mode: check URL params for secret
+const urlParams = new URLSearchParams(window.location.search);
+const devSecret = urlParams.get("dev") || "";
+
+// ---------------------------------------------------------------------------
+// Load config from server
+// ---------------------------------------------------------------------------
+async function loadConfig() {
+  try {
+    const res = await fetch("/config");
+    CONFIG = await res.json();
+  } catch (err) {
+    console.warn("Failed to load config:", err);
+  }
+  updateCallBtnState();
+}
+
+function updateCallBtnState() {
+  if (CONFIG.calls_remaining <= 0) {
+    callBtn.disabled = true;
+    callBtn.title = `Daily limit reached (${CONFIG.max_calls_per_day}/day)`;
+    callBtn.textContent = "Limit Reached";
+    previewBtn.disabled = true;
+    // Show the limit panel, hide the call panel
+    limitPanel.classList.remove("hidden");
+    callPanel.classList.add("hidden");
+  } else if (!previewPassed) {
+    callBtn.disabled = true;
+    callBtn.title = "Preview your message first";
+  } else {
+    callBtn.disabled = false;
+    callBtn.title = "";
+    callBtn.textContent = `Call Now (${CONFIG.calls_remaining} left today)`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Load representatives from API
 // ---------------------------------------------------------------------------
 async function loadRepresentatives() {
   try {
@@ -52,11 +109,10 @@ async function loadRepresentatives() {
     const data = await res.json();
     REPRESENTATIVES = data.representatives || [];
   } catch (err) {
-    console.warn("Failed to load representatives, using empty list:", err);
+    console.warn("Failed to load representatives:", err);
     REPRESENTATIVES = [];
   }
 
-  // Clear existing options (except the placeholder)
   while (repSelect.options.length > 1) {
     repSelect.remove(1);
   }
@@ -77,6 +133,8 @@ async function loadRepresentatives() {
   }
 }
 
+// Init
+loadConfig();
 loadRepresentatives();
 
 // Clear custom phone when rep is selected, and vice versa
@@ -87,18 +145,6 @@ repSelect.addEventListener("change", () => {
 customPhoneInput.addEventListener("input", () => {
   repSelect.value = "";
 });
-
-// ---------------------------------------------------------------------------
-// State
-// ---------------------------------------------------------------------------
-let pcClient = null;
-let isMuted = true;
-
-// Recording state
-let mediaRecorder = null;
-let recordedChunks = [];
-let recognition = null;
-let isRecording = false;
 
 // ---------------------------------------------------------------------------
 // Recording + transcription
@@ -113,16 +159,24 @@ recordBtn.addEventListener("click", async () => {
     document.querySelector('input[name="clone-voice"]:checked').value === "yes";
 
   if (cloneVoice) {
+    if (!CONFIG.voice_cloning_enabled) {
+      alert(
+        "Voice cloning is temporarily disabled while we are in demo mode. " +
+        "Your recording will still be transcribed into the message field. " +
+        "Select 'Record speech only' to continue."
+      );
+      return;
+    }
     const confirmed = confirm(
       "Your voice recording will be used to clone your voice for the call. " +
-        "The audio file will be saved locally. Continue?"
+      "The audio file will be saved locally. Continue?"
     );
     if (!confirmed) return;
   }
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    startRecording(stream, cloneVoice);
+    startRecording(stream, cloneVoice && CONFIG.voice_cloning_enabled);
   } catch (err) {
     recordStatus.textContent = "Microphone access denied.";
     console.error("Mic access error:", err);
@@ -136,7 +190,6 @@ function startRecording(stream, saveForClone) {
   recordBtn.classList.add("recording");
   recordStatus.textContent = "Recording... speak about the issue you care about.";
 
-  // MediaRecorder — save audio for voice cloning
   mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
   mediaRecorder.ondataavailable = (e) => {
     if (e.data.size > 0) recordedChunks.push(e.data);
@@ -148,14 +201,12 @@ function startRecording(stream, saveForClone) {
     if (saveForClone) {
       recordStatus.textContent = "Uploading recording...";
       try {
-        // 1. Upload audio
         const uploadRes = await fetch("/upload-voice", {
           method: "POST",
           body: blob,
         });
         const uploadData = await uploadRes.json();
 
-        // 2. Clone voice
         recordStatus.textContent = "Cloning voice...";
         const cloneRes = await fetch("/clone-voice", {
           method: "POST",
@@ -165,11 +216,9 @@ function startRecording(stream, saveForClone) {
         const cloneData = await cloneRes.json();
 
         if (cloneData.voice_id) {
-          recordStatus.textContent =
-            `Voice cloned! ID: ${cloneData.voice_id}. Transcript added above.`;
+          recordStatus.textContent = `Voice cloned! ID: ${cloneData.voice_id}. Transcript added above.`;
         } else {
-          recordStatus.textContent =
-            `Recording saved to ${uploadData.filename}. Clone failed: ${cloneData.error || "unknown error"}. Transcript added above.`;
+          recordStatus.textContent = `Recording saved. ${cloneData.error || "Clone unavailable."}. Transcript added above.`;
         }
       } catch (err) {
         console.error("Upload/clone failed:", err);
@@ -181,7 +230,6 @@ function startRecording(stream, saveForClone) {
   };
   mediaRecorder.start();
 
-  // SpeechRecognition — live transcription into the textarea
   const SpeechRecognition =
     window.SpeechRecognition || window.webkitSpeechRecognition;
   if (SpeechRecognition) {
@@ -210,13 +258,8 @@ function startRecording(stream, saveForClone) {
     };
 
     recognition.onend = () => {
-      // If we're still supposed to be recording but recognition ended, restart
       if (isRecording) {
-        try {
-          recognition.start();
-        } catch {
-          // already running
-        }
+        try { recognition.start(); } catch { /* already running */ }
       }
     };
 
@@ -236,7 +279,7 @@ function stopRecording() {
     mediaRecorder.stop();
   }
   if (recognition) {
-    recognition.onend = null; // prevent restart loop
+    recognition.onend = null;
     recognition.stop();
     recognition = null;
   }
@@ -304,19 +347,21 @@ function getDialTarget() {
     return {
       phone: normalizePhone(custom),
       name: customRepName.value.trim() || "your representative",
+      isCustom: true,
     };
   }
   if (repSelect.value) {
     return {
-      phone: repSelect.value, // already normalized in REPRESENTATIVES
+      phone: repSelect.value,
       name: repSelect.selectedOptions[0]?.dataset.name || "your representative",
+      isCustom: false,
     };
   }
   return null;
 }
 
 // ---------------------------------------------------------------------------
-// Preview — show what the bot would say (via LLM)
+// Preview — show what the bot would say (via LLM) + moderation
 // ---------------------------------------------------------------------------
 previewBtn.addEventListener("click", async () => {
   const name = document.getElementById("name").value.trim();
@@ -326,7 +371,6 @@ previewBtn.addEventListener("click", async () => {
   const target = getDialTarget();
   const repName = target?.name || "your representative";
 
-  // Show the call panel with loading state
   callPanel.classList.remove("hidden");
   transcriptEl.innerHTML = "";
   previewBtn.disabled = true;
@@ -350,18 +394,34 @@ previewBtn.addEventListener("click", async () => {
     const data = await res.json();
     transcriptEl.innerHTML = "";
 
-    addTranscriptLine("Preview", "If voicemail:", "bot");
-    addTranscriptLine("Bot", data.voicemail, "bot");
+    // Check moderation
+    const mod = data.moderation || {};
+    if (mod.approved === false) {
+      previewPassed = false;
+      addTranscriptLine("Moderation", `Message not approved: ${mod.reason || "Content policy violation."}`, "rep");
+      addTranscriptLine("Moderation", "Please revise your message and try again.", "rep");
+    } else {
+      previewPassed = true;
 
-    addTranscriptLine("Preview", "If a human answers:", "bot");
-    addTranscriptLine("Bot", data.human_conversation, "bot");
+      addTranscriptLine("Preview", "If voicemail:", "bot");
+      addTranscriptLine("Bot", data.voicemail, "bot");
+
+      addTranscriptLine("Preview", "If a human answers:", "bot");
+      addTranscriptLine("Bot", data.human_conversation, "bot");
+
+      if (data.calls_remaining !== undefined) {
+        CONFIG.calls_remaining = data.calls_remaining;
+      }
+    }
   } catch (err) {
     console.error("Preview failed:", err);
     transcriptEl.innerHTML = "";
     addTranscriptLine("Preview", "Failed to generate preview: " + err.message, "bot");
+    previewPassed = false;
   } finally {
     previewBtn.disabled = false;
     previewBtn.textContent = "Preview";
+    updateCallBtnState();
   }
 });
 
@@ -370,6 +430,11 @@ previewBtn.addEventListener("click", async () => {
 // ---------------------------------------------------------------------------
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
+
+  if (!previewPassed) {
+    alert("Please preview your message before calling.");
+    return;
+  }
 
   const name = document.getElementById("name").value.trim();
   const address = document.getElementById("address").value.trim();
@@ -383,10 +448,14 @@ form.addEventListener("submit", async (e) => {
     return;
   }
 
-  // Normalize the user's own phone number too
+  // In demo mode, warn if using custom phone without dev secret
+  if (CONFIG.demo_mode && target.isCustom && !devSecret) {
+    alert("In demo mode, calls are limited to listed representatives. Select one from the dropdown.");
+    return;
+  }
+
   const normalizedUserPhone = phone ? normalizePhone(phone) : "";
 
-  // Disable form, show call panel
   callBtn.disabled = true;
   callBtn.textContent = "Calling...";
   callPanel.classList.remove("hidden");
@@ -407,19 +476,31 @@ form.addEventListener("submit", async (e) => {
           constituent_phone_number: normalizedUserPhone,
           rep_name: target.name,
           issue_text: message,
+          preview_passed: true,
+          dev_secret: devSecret,
         },
       }),
     });
 
     if (!res.ok) {
-      throw new Error(`Server error: ${res.status}`);
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || `Server error: ${res.status}`);
     }
 
     const data = await res.json();
 
+    // Update remaining calls
+    if (data.calls_remaining !== undefined) {
+      CONFIG.calls_remaining = data.calls_remaining;
+    }
+
+    // Reset preview gate for next call
+    previewPassed = false;
+
     if (!listenIn) {
-      setStatus("Call in progress (not listening in)");
+      setStatus(`Call in progress (not listening in). ${CONFIG.calls_remaining} calls remaining today.`);
       callBtn.textContent = "Call in Progress";
+      updateCallBtnState();
       return;
     }
 
@@ -441,14 +522,12 @@ form.addEventListener("submit", async (e) => {
         },
         onBotDisconnected: () => {
           setStatus("Call ended");
-          callBtn.disabled = false;
-          callBtn.textContent = "Call Now";
+          updateCallBtnState();
         },
         onDisconnected: () => {
           setStatus("Disconnected");
-          callBtn.disabled = false;
-          callBtn.textContent = "Call Now";
           pcClient = null;
+          updateCallBtnState();
         },
         onTrackStarted: handleTrackStarted,
         onTrackStopped: handleTrackStopped,
@@ -476,8 +555,7 @@ form.addEventListener("submit", async (e) => {
   } catch (err) {
     console.error("Call failed:", err);
     setStatus("Failed: " + err.message);
-    callBtn.disabled = false;
-    callBtn.textContent = "Call Now";
+    updateCallBtnState();
   }
 });
 
@@ -507,7 +585,6 @@ hangupBtn.addEventListener("click", async () => {
     await pcClient.disconnect();
     pcClient = null;
   }
-  callBtn.disabled = false;
-  callBtn.textContent = "Call Now";
+  updateCallBtnState();
   setStatus("Call ended");
 });

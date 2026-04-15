@@ -13,29 +13,48 @@ With that whimsy in mind, `American Dream Phone` is a [Pipecat](https://github.c
 ## dependencies
 
 - Python 3.12+
+- Node.js 22+
 - [uv](https://docs.astral.sh/uv/)
-- API keys. See [services](##services).
+- API keys. See [services](#services).
 
 ## setup
 
 ```bash
 cp env.example .env
 ```
-Add API keys as needed. See [services](##services).
+Add API keys as needed. See [services](#services).
 
 ```bash
+# Backend
 uv sync
+
+# Frontend
+cd frontend && npm install
 ```
 
-## run
+## run locally
 
-### start the server
+You need two terminals:
+
+```bash
+# Terminal 1 — API server
+uv run python server.py
+```
+
+```bash
+# Terminal 2 — Frontend dev server
+cd frontend && npm run dev
+```
+
+Open http://localhost:5173 in your browser. The frontend proxies API requests to the backend at `localhost:7860`.
+
+### headless / curl testing
+
+If you don't need the frontend, you can still run the bot directly:
 
 ```bash
 uv run python bot.py -t daily
 ```
-
-### make a call
 
 #### test (webrtc)
 ```bash
@@ -52,6 +71,53 @@ curl -X POST http://localhost:7860/start \
   -d '{"createDailyRoom": true, "dailyRoomProperties": {"enable_dialout": true}, "body": {"dialout_settings": [{"phoneNumber": "+15551234567"}]}}'
 ```
 This actually calls the phone number. (Debug pro tip — open the `dailyRoom` URL and listen in on the conversation.)
+
+## deploy
+
+### build the frontend
+
+```bash
+cd frontend && npm run build
+```
+
+This outputs static files to `frontend/dist/`. Serve them however you like (nginx, Cloudflare Pages, etc.) and point API requests (`/start`, `/preview`, `/upload-voice`, `/clone-voice`, `/representatives`) at the backend.
+
+### run the backend
+
+```bash
+uv run python server.py --host 0.0.0.0 --port 7860
+```
+
+### environment variables
+
+All API keys go in `.env`. See `env.example` for the full list. Required:
+
+| Variable | Service |
+|----------|---------|
+| `DAILY_API_KEY` | Daily (transport + dialout) |
+| `ANTHROPIC_API_KEY` | Claude (LLM) |
+| `DEEPGRAM_API_KEY` | Deepgram (STT) |
+| `CARTESIA_API_KEY` | Cartesia (TTS + voice cloning) |
+
+## API endpoints
+
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/start` | POST | Create Daily room, launch bot, start call |
+| `/preview` | POST | LLM-generated preview of what the bot will say |
+| `/upload-voice` | POST | Save voice recording for cloning |
+| `/clone-voice` | POST | Clone voice via Cartesia API |
+| `/representatives` | GET | Look up reps by address (placeholder) |
+
+## project structure
+
+```
+bot.py          — Bot logic (IVR navigation, voicemail, human conversation)
+server.py       — FastAPI server (all HTTP endpoints)
+prompts/        — System prompts and message templates
+frontend/       — Vite + vanilla JS web UI
+test_calls.sh   — CLI test harness
+```
 
 ## services
 By using pipecat, all services (transport, LLM, STT, and TTS) are all changeable. These are just the ones I started with.
@@ -70,7 +136,7 @@ By using pipecat, all services (transport, LLM, STT, and TTS) are all changeable
 
 ## testing
 
-With the bot server running (`uv run python bot.py -t daily`), use the test harness:
+With the bot server running (`uv run python server.py`), use the test harness:
 
 ```bash
 # Browser test — talk to the bot directly, verify IVR detection + conversation

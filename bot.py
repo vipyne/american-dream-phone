@@ -25,6 +25,7 @@ Or start a dialout session::
       -d '{"createDailyRoom": true, "dailyRoomProperties": {"enable_dialout": true}, "body": {"dialout_settings": [{"phoneNumber": "+1XXXXXXXXXX"}]}}'
 """
 
+import asyncio
 import os
 from typing import Any, Dict, List, Optional
 
@@ -344,10 +345,27 @@ VOICEMAIL DETECTION: If you hear any voicemail indicators such as "leave a messa
         await task.cancel()
 
     # =================================
+    # Auto-hangup timer (demo mode)
+    # =================================
+    max_duration = body.get("max_call_duration_secs", 0)
+
+    async def _auto_hangup():
+        await asyncio.sleep(max_duration)
+        logger.warning(f"Auto-hangup: call exceeded {max_duration}s limit")
+        await task.queue_frame(EndFrame())
+
+    hangup_timer = None
+    if max_duration > 0:
+        hangup_timer = asyncio.create_task(_auto_hangup())
+
+    # =================================
     # Run
     # =================================
     runner = PipelineRunner(handle_sigint=handle_sigint)
     await runner.run(task)
+
+    if hangup_timer and not hangup_timer.done():
+        hangup_timer.cancel()
 
 
 async def bot(runner_args: RunnerArguments):

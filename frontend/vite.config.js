@@ -17,6 +17,10 @@ export default {
         target: "http://localhost:7860",
         changeOrigin: true,
       },
+      "/config": {
+        target: "http://localhost:7860",
+        changeOrigin: true,
+      },
       "/representatives": {
         target: "http://localhost:7860",
         changeOrigin: true,
