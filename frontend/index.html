@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>American Dream Phone</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="stripe"></div>
+
+  <main class="container">
+    <header>
+      <h1>American Dream Phone</h1>
+      <p class="tagline">Democracy dies in silence.</p>
+    </header>
+
+    <div class="two-column">
+
+    <!-- FORM -->
+    <form id="call-form">
+      <div class="form-row">
+        <label for="name">Your Name</label>
+        <input type="text" id="name" name="name" required placeholder="Vanessa" />
+      </div>
+
+      <div class="form-row">
+        <label for="address">Address</label>
+        <input type="text" id="address" name="address" required placeholder="123 Bourbon St, New Orleans, LA 70116" />
+      </div>
+
+      <div class="form-row">
+        <label for="phone">Phone Number</label>
+        <input type="tel" id="phone" name="phone" placeholder="+15045551234" />
+      </div>
+
+      <div class="form-row">
+        <label for="rep">Representative</label>
+        <select id="rep" name="rep">
+          <option value="" disabled selected>Choose a representative</option>
+        </select>
+      </div>
+
+      <div class="form-row">
+        <label for="custom-phone">Or enter a phone number</label>
+        <input type="tel" id="custom-phone" name="custom-phone" placeholder="(202) 555-1234" />
+        <span class="hint">Numbers are normalized to +1 format automatically.</span>
+        <input type="text" id="custom-rep-name" name="custom-rep-name" placeholder="Rep. name (e.g. Senator Jane Doe)" style="margin-top: 0.3rem;" />
+      </div>
+
+      <div class="form-row">
+        <label for="message">Your Message</label>
+        <p class="hint">Type, paste a call template, or record yourself talking about the issue you care about.</p>
+        <textarea id="message" name="message" rows="6" required
+          placeholder="Paste a call template from an organization, or write your own message. Use [NAME], [ADDRESS], etc. for substitution."></textarea>
+        <div class="record-controls">
+          <div class="radio-row">
+            <label>
+              <input type="radio" name="clone-voice" value="no" checked />
+              Record speech only
+            </label>
+            <label>
+              <input type="radio" name="clone-voice" value="yes" />
+              Record + clone my voice
+            </label>
+          </div>
+          <button type="button" id="record-btn" class="record-btn">Record</button>
+          <span id="record-status" class="record-status"></span>
+        </div>
+      </div>
+
+      <div class="form-row checkbox-row">
+        <label>
+          <input type="checkbox" id="listen-in" checked />
+          Listen in on call
+        </label>
+      </div>
+
+      <div class="button-row">
+        <button type="button" id="preview-btn" class="preview-btn">Preview</button>
+        <button type="submit" id="call-btn">Call Now</button>
+      </div>
+    </form>
+
+    <!-- CALL STATUS (right column) -->
+    <section id="call-panel" class="hidden">
+      <div class="status-bar">
+        <span id="status-text">Preparing call...</span>
+        <div class="call-controls">
+          <button id="mute-btn" class="control-btn" title="Unmute to speak">Unmute</button>
+          <button id="hangup-btn" class="control-btn hangup" title="End call">Hang Up</button>
+        </div>
+      </div>
+
+      <div class="transcript-container">
+        <h3>Live Transcript</h3>
+        <div id="transcript"></div>
+      </div>
+    </section>
+
+    </div><!-- .two-column -->
+  </main>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>

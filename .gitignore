@@ -12,3 +12,10 @@ pipecat
 
 # my doodles are in here
 notes.txt
+
+# frontend build artifacts
+frontend/node_modules
+frontend/dist
+
+# voice recordings
+temp_local_recordings

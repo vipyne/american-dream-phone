@@ -63,19 +63,29 @@ from pipecat.transports.daily.transport import DailyParams, DailyTransport
 load_dotenv(override=True)
 
 
-prompt_substitution_data = {
+DEFAULT_SUBSTITUTION_DATA = {
     "constituent_name": "Vanessa",
     "rep": "Senator Bill Cassidy",
     "constituent_address": os.getenv("CONSTITUENT_ADDRESS"),
     "constituent_phone_number": os.getenv("CONSTITUENT_PHONE_NUMBER"),
 }
 
-# Load prompts
+# Load prompt templates
 with open("prompts/vm_001_hr1.txt", "r") as f:
-    voicemail_message = f.read().format(**prompt_substitution_data)
+    voicemail_message_template = f.read()
 
 with open("prompts/human_conversation_system_instruction.txt", "r") as f:
     human_conversation_system_instruction = f.read()
+
+
+def build_substitution_data(body: dict) -> dict:
+    """Build prompt substitution data from request body, falling back to defaults."""
+    return {
+        "constituent_name": body.get("constituent_name", DEFAULT_SUBSTITUTION_DATA["constituent_name"]),
+        "rep": body.get("rep_name", DEFAULT_SUBSTITUTION_DATA["rep"]),
+        "constituent_address": body.get("constituent_address", DEFAULT_SUBSTITUTION_DATA["constituent_address"]),
+        "constituent_phone_number": body.get("constituent_phone_number", DEFAULT_SUBSTITUTION_DATA["constituent_phone_number"]),
+    }
 
 VOICEMAIL_INDICATORS = [
     "leave a message",
@@ -155,7 +165,13 @@ async def run_bot(
     dialout_settings = get_dialout_settings(body)
     test_mode = "testInPrebuilt" in body
 
+    # Build prompt data from request body (frontend passes these) or use defaults
+    sub_data = build_substitution_data(body)
+    voicemail_message = voicemail_message_template.format(**sub_data)
+    issue_text = body.get("issue_text", "")
+
     logger.info(f"test_mode: {test_mode}, dialout_settings: {dialout_settings}")
+    logger.info(f"Constituent: {sub_data['constituent_name']}, Rep: {sub_data['rep']}")
 
     # =================================
     # Services
@@ -363,6 +379,8 @@ async def bot(runner_args: RunnerArguments):
 
 
 if __name__ == "__main__":
+    # For standalone testing via pipecat runner (curl-based).
+    # For the full app with frontend, use: uv run python server.py
     from pipecat.runner.run import main
 
     main()
