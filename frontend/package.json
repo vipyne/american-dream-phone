@@ -1,0 +1,17 @@
+{
+  "name": "american-dream-phone-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@pipecat-ai/client-js": "^1.7.0",
+    "@pipecat-ai/daily-transport": "^1.6.1"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}

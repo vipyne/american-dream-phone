@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>American Dream Phone</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="stripe"></div>
+
+  <main class="container">
+    <header>
+      <h1>
+        <!-- <span class="title-american">American</span> -->
+        <span class="title-dream-phone">American Dream Phone</span>
+      </h1>
+      <p class="tagline">Democracy Dies in Silence</p>
+    </header>
+
+    <div id="call-row" class="call-row hidden">
+      <button type="submit" form="call-form" id="call-btn">Call Now</button>
+      <label class="listen-in-label">
+        <input type="checkbox" id="listen-in" checked />
+        Listen in
+      </label>
+    </div>
+
+    <div class="two-column">
+
+    <!-- FORM -->
+    <form id="call-form">
+      <div class="form-row">
+        <label for="name">Your Name</label>
+        <input type="text" id="name" name="name" required placeholder="Vanessa" />
+      </div>
+
+      <div class="form-row">
+        <label for="state">State</label>
+        <select id="state" name="state" required>
+          <option value="" disabled selected>Choose your state</option>
+        </select>
+      </div>
+
+      <div class="form-row">
+        <label for="phone">Your Phone Number</label>
+        <input type="tel" id="phone" name="phone" placeholder="+15045551234" />
+      </div>
+
+      <div class="form-row">
+        <label for="rep">Representative</label>
+        <select id="rep" name="rep">
+          <option value="" disabled selected>Choose a representative</option>
+        </select>
+        <input type="tel" id="rep-phone-display" readonly class="rep-phone-display" placeholder="Phone number will appear here" />
+      </div>
+
+      <div class="form-row hidden" id="custom-phone-row">
+        <label for="custom-phone">Or enter a phone number</label>
+        <input type="tel" id="custom-phone" name="custom-phone" placeholder="(202) 555-1234" />
+        <span class="hint">Numbers are normalized to +1 format automatically.</span>
+        <input type="text" id="custom-rep-name" name="custom-rep-name" placeholder="Rep. name (e.g. Senator Jane Doe)" style="margin-top: 0.3rem;" />
+      </div>
+
+      <div class="form-row">
+        <label for="message">Your Message</label>
+        <p class="hint">Type, paste a call template, or record yourself talking about the issue you care about.</p>
+        <textarea id="message" name="message" rows="6" required
+          placeholder="Paste a call template from an organization, or write your own message. Use [NAME], [ADDRESS], etc. for substitution."></textarea>
+        <div class="record-controls">
+          <div class="radio-row">
+            <label>
+              <input type="radio" name="clone-voice" value="no" checked />
+              Record speech only
+            </label>
+            <label>
+              <input type="radio" name="clone-voice" value="yes" />
+              Record + clone my voice
+            </label>
+          </div>
+          <button type="button" id="record-btn" class="record-btn">Record</button>
+          <span id="record-status" class="record-status"></span>
+        </div>
+      </div>
+
+      <button type="button" id="preview-btn" class="preview-btn">Preview</button>
+    </form>
+
+    <!-- LIMIT REACHED (right column) -->
+    <section id="limit-panel" class="hidden">
+      <h3>Today's calls have been used up</h3>
+      <p>Check back tomorrow, or stand up your own American Dream Phone:</p>
+      <a href="https://github.com/vipyne/american-dream-phone" target="_blank" class="repo-link">github.com/vipyne/american-dream-phone</a>
+      <div class="demo-video">
+        <p>See it in action:</p>
+        <div style="position:relative;padding-bottom:56.25%;height:0;">
+          <iframe src="https://www.loom.com/embed/ce0e8051e8cb430285a137ef290f0364" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen style="position:absolute;top:0;left:0;width:100%;height:100%;border-radius:8px;"></iframe>
+        </div>
+      </div>
+    </section>
+
+    <!-- RIGHT COLUMN -->
+    <section id="right-panel" class="hidden">
+      <div id="call-status-bar" class="status-bar hidden">
+        <span id="status-text">Preparing call...</span>
+        <div class="call-controls">
+          <button id="mute-btn" class="control-btn" title="Unmute to speak">Unmute</button>
+          <button id="hangup-btn" class="control-btn hangup" title="End call">Hang Up</button>
+        </div>
+      </div>
+
+      <div class="transcript-container">
+        <h3>Live Transcript</h3>
+        <div id="transcript"></div>
+      </div>
+    </section>
+
+    </div><!-- .two-column -->
+  </main>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>

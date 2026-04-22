@@ -25,6 +25,7 @@ Or start a dialout session::
       -d '{"createDailyRoom": true, "dailyRoomProperties": {"enable_dialout": true}, "body": {"dialout_settings": [{"phoneNumber": "+1XXXXXXXXXX"}]}}'
 """
 
+import asyncio
 import os
 from typing import Any, Dict, List, Optional
 
@@ -63,19 +64,31 @@ from pipecat.transports.daily.transport import DailyParams, DailyTransport
 load_dotenv(override=True)
 
 
-prompt_substitution_data = {
+DEFAULT_SUBSTITUTION_DATA = {
     "constituent_name": "Vanessa",
     "rep": "Senator Bill Cassidy",
-    "constituent_address": os.getenv("CONSTITUENT_ADDRESS"),
+    "constituent_state": "Louisiana",
     "constituent_phone_number": os.getenv("CONSTITUENT_PHONE_NUMBER"),
+    "issue_text": "",
 }
 
-# Load prompts
+# Load prompt templates
 with open("prompts/vm_001_hr1.txt", "r") as f:
-    voicemail_message = f.read().format(**prompt_substitution_data)
+    voicemail_message_template = f.read()
 
 with open("prompts/human_conversation_system_instruction.txt", "r") as f:
     human_conversation_system_instruction = f.read()
+
+
+def build_substitution_data(body: dict) -> dict:
+    """Build prompt substitution data from request body, falling back to defaults."""
+    return {
+        "constituent_name": body.get("constituent_name", DEFAULT_SUBSTITUTION_DATA["constituent_name"]),
+        "rep": body.get("rep_name", DEFAULT_SUBSTITUTION_DATA["rep"]),
+        "constituent_state": body.get("constituent_state", DEFAULT_SUBSTITUTION_DATA["constituent_state"]),
+        "constituent_phone_number": body.get("constituent_phone_number", DEFAULT_SUBSTITUTION_DATA["constituent_phone_number"]),
+        "issue_text": body.get("issue_text", DEFAULT_SUBSTITUTION_DATA["issue_text"]),
+    }
 
 VOICEMAIL_INDICATORS = [
     "leave a message",
@@ -155,7 +168,13 @@ async def run_bot(
     dialout_settings = get_dialout_settings(body)
     test_mode = "testInPrebuilt" in body
 
+    # Build prompt data from request body (frontend passes these) or use defaults
+    sub_data = build_substitution_data(body)
+    voicemail_message = voicemail_message_template.format(**sub_data)
+    issue_text = body.get("issue_text", "")
+
     logger.info(f"test_mode: {test_mode}, dialout_settings: {dialout_settings}")
+    logger.info(f"Constituent: {sub_data['constituent_name']}, Rep: {sub_data['rep']}")
 
     # =================================
     # Services
@@ -328,10 +347,27 @@ VOICEMAIL DETECTION: If you hear any voicemail indicators such as "leave a messa
         await task.cancel()
 
     # =================================
+    # Auto-hangup timer (demo mode)
+    # =================================
+    max_duration = body.get("max_call_duration_secs", 0)
+
+    async def _auto_hangup():
+        await asyncio.sleep(max_duration)
+        logger.warning(f"Auto-hangup: call exceeded {max_duration}s limit")
+        await task.queue_frame(EndFrame())
+
+    hangup_timer = None
+    if max_duration > 0:
+        hangup_timer = asyncio.create_task(_auto_hangup())
+
+    # =================================
     # Run
     # =================================
     runner = PipelineRunner(handle_sigint=handle_sigint)
     await runner.run(task)
+
+    if hangup_timer and not hangup_timer.done():
+        hangup_timer.cancel()
 
 
 async def bot(runner_args: RunnerArguments):
@@ -363,6 +399,8 @@ async def bot(runner_args: RunnerArguments):
 
 
 if __name__ == "__main__":
+    # For standalone testing via pipecat runner (curl-based).
+    # For the full app with frontend, use: uv run python server.py
     from pipecat.runner.run import main
 
     main()
