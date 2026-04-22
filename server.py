@@ -24,6 +24,7 @@ from pathlib import Path
 
 import aiohttp
 import uvicorn
+import yaml
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -49,15 +50,90 @@ VOICE_CLONING_ENABLED = not DEMO_MODE
 _daily_call_counts: dict[str, int] = defaultdict(int)
 
 # ---------------------------------------------------------------------------
-# Representatives data (hardcoded for now)
+# Representatives data — fetched from unitedstates/congress-legislators
 # ---------------------------------------------------------------------------
-REPRESENTATIVES = [
-    {"name": "Sen. Bill Cassidy", "phone": "+12022245824", "level": "Federal", "state": "LA"},
-    {"name": "Sen. John Kennedy", "phone": "+12022244623", "level": "Federal", "state": "LA"},
-    {"name": "Rep. Troy Carter (LA-02)", "phone": "+12022258490", "level": "Federal", "state": "LA"},
+LEGISLATORS_YAML_URL = "https://raw.githubusercontent.com/unitedstates/congress-legislators/main/legislators-current.yaml"
+
+# Louisiana-specific reps (hardcoded until we have a district lookup)
+LA_EXTRA_REPS = [
+    {"name": "Rep. Troy Carter (LA-02)", "phone": "+12022258490", "level": "Federal", "state": "LA", "type": "rep"},
+    {"name": "Sen. Jay Morris (R-West Monroe)", "phone": "+13183624270", "level": "State", "state": "LA", "type": "sen", "party": "Republican"},
 ]
 
-WHITELIST_PHONES = {rep["phone"] for rep in REPRESENTATIVES}
+# Cache: { state: [rep, ...] } — populated on first request
+_senators_by_state: dict[str, list[dict]] = {}
+_senators_loaded = False
+
+
+def _normalize_congress_phone(phone: str) -> str:
+    """Convert '202-224-5824' to '+12022245824'."""
+    digits = phone.replace("-", "").replace(" ", "").replace("(", "").replace(")", "")
+    if len(digits) == 10:
+        return "+1" + digits
+    if len(digits) == 11 and digits.startswith("1"):
+        return "+" + digits
+    return "+" + digits
+
+
+async def _load_senators():
+    """Fetch current senators from GitHub and cache by state."""
+    global _senators_by_state, _senators_loaded
+
+    logger.info(f"Fetching legislators from {LEGISLATORS_YAML_URL}")
+    async with aiohttp.ClientSession() as session:
+        async with session.get(LEGISLATORS_YAML_URL) as resp:
+            if resp.status != 200:
+                logger.error(f"Failed to fetch legislators: {resp.status}")
+                return
+            text = await resp.text()
+
+    data = yaml.safe_load(text)
+    _senators_by_state.clear()
+
+    for leg in data:
+        terms = leg.get("terms", [])
+        if not terms:
+            continue
+        current_term = terms[-1]
+        if current_term.get("type") != "sen":
+            continue
+
+        phone_raw = current_term.get("phone", "")
+        if not phone_raw:
+            continue
+
+        name_data = leg.get("name", {})
+        name = name_data.get("official_full", f"{name_data.get('first', '')} {name_data.get('last', '')}")
+        state = current_term["state"]
+        party = current_term.get("party", "")
+
+        rep = {
+            "name": f"Sen. {name}",
+            "phone": _normalize_congress_phone(phone_raw),
+            "level": "Federal",
+            "state": state,
+            "type": "sen",
+            "party": party,
+        }
+
+        if state not in _senators_by_state:
+            _senators_by_state[state] = []
+        _senators_by_state[state].append(rep)
+
+    _senators_loaded = True
+    total = sum(len(v) for v in _senators_by_state.values())
+    logger.info(f"Loaded {total} senators across {len(_senators_by_state)} states")
+
+
+def _get_whitelist_phones() -> set[str]:
+    """Build whitelist from all loaded senators + LA extras."""
+    phones = set()
+    for reps in _senators_by_state.values():
+        for r in reps:
+            phones.add(r["phone"])
+    for r in LA_EXTRA_REPS:
+        phones.add(r["phone"])
+    return phones
 
 
 def _today() -> str:
@@ -72,6 +148,11 @@ def _calls_remaining() -> int:
 # App
 # ---------------------------------------------------------------------------
 app = FastAPI(title="American Dream Phone")
+
+@app.on_event("startup")
+async def startup():
+    await _load_senators()
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -140,7 +221,7 @@ async def start_agent(request: Request):
         dialout_settings = body.get("dialout_settings", [])
         if dialout_settings and not is_dev:
             phone = dialout_settings[0].get("phoneNumber", "")
-            if phone not in WHITELIST_PHONES:
+            if phone not in _get_whitelist_phones():
                 return JSONResponse(
                     {"error": "In demo mode, calls are limited to listed representatives."},
                     status_code=403,
@@ -395,18 +476,32 @@ async def preview_call(request: Request):
 
 
 # ---------------------------------------------------------------------------
-# GET /representatives — look up reps by address (placeholder)
+# GET /representatives — look up reps by state
 # ---------------------------------------------------------------------------
 @app.get("/representatives")
-async def get_representatives(address: str = ""):
-    """Look up representatives by address.
+async def get_representatives(state: str = ""):
+    """Look up senators by state.
 
-    Currently returns hardcoded New Orleans + Federal LA reps.
-    Future: integrate BallotReady or 5calls API.
+    Returns the 2 US senators for the given state code.
+    For Louisiana, also includes hardcoded local/house reps.
     """
-    # TODO: Use address to look up actual representatives
-    # For now, return the hardcoded list regardless of address
-    return {"address": address, "representatives": REPRESENTATIVES}
+    if not _senators_loaded:
+        await _load_senators()
+
+    state = state.upper().strip()
+    reps = []
+
+    if state and state in _senators_by_state:
+        reps.extend(_senators_by_state[state])
+        # Add LA-specific extras
+        if state == "LA":
+            reps.extend(LA_EXTRA_REPS)
+    elif not state:
+        # No state specified — return all senators
+        for state_reps in _senators_by_state.values():
+            reps.extend(state_reps)
+
+    return {"state": state, "representatives": reps}
 
 
 # ---------------------------------------------------------------------------

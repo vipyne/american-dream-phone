@@ -2,7 +2,7 @@
 
 <img src="images/america.png" width="250px"> + <img src="images/dream-phone-og.jpg" width="240px"> = <img src="images/american-dream-phone-usa-horray.jpeg" width="130px">
 
-> Democracy dies in silence
+> Democracy Dies in Silence
 
 See a demo of it in action [here](https://www.loom.com/share/ce0e8051e8cb430285a137ef290f0364).
 

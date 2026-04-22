@@ -11,9 +11,20 @@
 
   <main class="container">
     <header>
-      <h1>American Dream Phone</h1>
-      <p class="tagline">Democracy dies in silence.</p>
+      <h1>
+        <!-- <span class="title-american">American</span> -->
+        <span class="title-dream-phone">American Dream Phone</span>
+      </h1>
+      <p class="tagline">Democracy Dies in Silence</p>
     </header>
+
+    <div id="call-row" class="call-row hidden">
+      <button type="submit" form="call-form" id="call-btn">Call Now</button>
+      <label class="listen-in-label">
+        <input type="checkbox" id="listen-in" checked />
+        Listen in
+      </label>
+    </div>
 
     <div class="two-column">
 
@@ -25,12 +36,14 @@
       </div>
 
       <div class="form-row">
-        <label for="address">Address</label>
-        <input type="text" id="address" name="address" required placeholder="123 Bourbon St, New Orleans, LA 70116" />
+        <label for="state">State</label>
+        <select id="state" name="state" required>
+          <option value="" disabled selected>Choose your state</option>
+        </select>
       </div>
 
       <div class="form-row">
-        <label for="phone">Phone Number</label>
+        <label for="phone">Your Phone Number</label>
         <input type="tel" id="phone" name="phone" placeholder="+15045551234" />
       </div>
 
@@ -39,9 +52,10 @@
         <select id="rep" name="rep">
           <option value="" disabled selected>Choose a representative</option>
         </select>
+        <input type="tel" id="rep-phone-display" readonly class="rep-phone-display" placeholder="Phone number will appear here" />
       </div>
 
-      <div class="form-row">
+      <div class="form-row hidden" id="custom-phone-row">
         <label for="custom-phone">Or enter a phone number</label>
         <input type="tel" id="custom-phone" name="custom-phone" placeholder="(202) 555-1234" />
         <span class="hint">Numbers are normalized to +1 format automatically.</span>
@@ -69,17 +83,7 @@
         </div>
       </div>
 
-      <div class="form-row checkbox-row">
-        <label>
-          <input type="checkbox" id="listen-in" checked />
-          Listen in on call
-        </label>
-      </div>
-
-      <div class="button-row">
-        <button type="button" id="preview-btn" class="preview-btn">Preview</button>
-        <button type="submit" id="call-btn">Call Now</button>
-      </div>
+      <button type="button" id="preview-btn" class="preview-btn">Preview</button>
     </form>
 
     <!-- LIMIT REACHED (right column) -->
@@ -95,9 +99,9 @@
       </div>
     </section>
 
-    <!-- CALL STATUS (right column) -->
-    <section id="call-panel" class="hidden">
-      <div class="status-bar">
+    <!-- RIGHT COLUMN -->
+    <section id="right-panel" class="hidden">
+      <div id="call-status-bar" class="status-bar hidden">
         <span id="status-text">Preparing call...</span>
         <div class="call-controls">
           <button id="mute-btn" class="control-btn" title="Unmute to speak">Unmute</button>

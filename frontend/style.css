@@ -53,7 +53,7 @@ body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 2rem;
-  align-items: start;
+  align-items: stretch;
 }
 
 /* Header */
@@ -66,7 +66,22 @@ header h1 {
   font-size: 1.75rem;
   font-weight: 700;
   color: var(--navy);
-  letter-spacing: -0.5px;
+  line-height: 1.1;
+}
+
+.title-american {
+  display: block;
+  letter-spacing: 0.35em;
+}
+
+.title-dream-phone {
+  display: block;
+  letter-spacing: 0.15em;
+}
+
+header h1 i {
+/*  font-family: Georgia, "Times New Roman", serif;*/
+/*  font-style: italic;*/
 }
 
 .tagline {
@@ -124,6 +139,19 @@ textarea {
 
 select {
   cursor: pointer;
+}
+
+.rep-phone-display {
+  margin-top: 0.3rem;
+  background: var(--cream);
+  color: var(--text-light);
+  cursor: text;
+  user-select: all;
+}
+
+.rep-phone-display:not(:placeholder-shown) {
+  color: var(--text);
+  font-weight: 500;
 }
 
 .checkbox-row {
@@ -215,16 +243,10 @@ select {
   color: var(--text-light);
 }
 
-/* Button row */
-.button-row {
-  display: flex;
-  gap: 0.75rem;
-  margin-top: 0.5rem;
-}
-
 /* Preview button */
 .preview-btn {
-  flex: 1;
+  margin-top: 0.5rem;
+  width: 100%;
   padding: 0.85rem 1.5rem;
   background: transparent;
   color: var(--steel);
@@ -242,9 +264,33 @@ select {
   color: var(--white);
 }
 
-/* Call button */
+/* Call row — centered above columns */
+.call-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.listen-in-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--navy);
+  cursor: pointer;
+}
+
+.listen-in-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--steel);
+}
+
 #call-btn {
-  flex: 1;
+  width: auto;
   padding: 0.85rem 1.5rem;
   background: var(--red);
   color: var(--white);
@@ -276,9 +322,18 @@ select {
   display: none !important;
 }
 
-#call-panel {
+#right-panel {
   border-left: 2px solid var(--cream-dark);
   padding-left: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+}
+
+#right-panel .transcript-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
 .status-bar {
@@ -390,7 +445,7 @@ select {
   border: 1.5px solid var(--cream-dark);
   border-radius: 8px;
   padding: 1rem;
-  max-height: 300px;
+  flex: 1;
   overflow-y: auto;
   font-size: 0.9rem;
   line-height: 1.7;
@@ -435,7 +490,7 @@ select {
     grid-template-columns: 1fr;
   }
 
-  #call-panel,
+  #right-panel,
   #limit-panel {
     border-left: none;
     border-top: 2px solid var(--cream-dark);

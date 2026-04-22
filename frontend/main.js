@@ -32,14 +32,34 @@ function normalizePhone(raw) {
 }
 
 // ---------------------------------------------------------------------------
+// US states
+// ---------------------------------------------------------------------------
+const US_STATES = [
+  ["AL","Alabama"],["AK","Alaska"],["AZ","Arizona"],["AR","Arkansas"],["CA","California"],
+  ["CO","Colorado"],["CT","Connecticut"],["DE","Delaware"],["FL","Florida"],["GA","Georgia"],
+  ["HI","Hawaii"],["ID","Idaho"],["IL","Illinois"],["IN","Indiana"],["IA","Iowa"],
+  ["KS","Kansas"],["KY","Kentucky"],["LA","Louisiana"],["ME","Maine"],["MD","Maryland"],
+  ["MA","Massachusetts"],["MI","Michigan"],["MN","Minnesota"],["MS","Mississippi"],["MO","Missouri"],
+  ["MT","Montana"],["NE","Nebraska"],["NV","Nevada"],["NH","New Hampshire"],["NJ","New Jersey"],
+  ["NM","New Mexico"],["NY","New York"],["NC","North Carolina"],["ND","North Dakota"],["OH","Ohio"],
+  ["OK","Oklahoma"],["OR","Oregon"],["PA","Pennsylvania"],["RI","Rhode Island"],["SC","South Carolina"],
+  ["SD","South Dakota"],["TN","Tennessee"],["TX","Texas"],["UT","Utah"],["VT","Vermont"],
+  ["VA","Virginia"],["WA","Washington"],["WV","West Virginia"],["WI","Wisconsin"],["WY","Wyoming"],
+];
+
+// ---------------------------------------------------------------------------
 // DOM refs
 // ---------------------------------------------------------------------------
 const form = document.getElementById("call-form");
+const callRow = document.getElementById("call-row");
 const callBtn = document.getElementById("call-btn");
+const stateSelect = document.getElementById("state");
 const repSelect = document.getElementById("rep");
+const repPhoneDisplay = document.getElementById("rep-phone-display");
 const customPhoneInput = document.getElementById("custom-phone");
 const customRepName = document.getElementById("custom-rep-name");
-const callPanel = document.getElementById("call-panel");
+const rightPanel = document.getElementById("right-panel");
+const callStatusBar = document.getElementById("call-status-bar");
 const statusText = document.getElementById("status-text");
 const transcriptEl = document.getElementById("transcript");
 const muteBtn = document.getElementById("mute-btn");
@@ -64,9 +84,16 @@ let recordedChunks = [];
 let recognition = null;
 let isRecording = false;
 
-// Dev mode: check URL params for secret
+// Dev mode: check URL params
 const urlParams = new URLSearchParams(window.location.search);
 const devSecret = urlParams.get("dev") || "";
+const isLocalhost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+const vandev = urlParams.get("vandev") === "true" && isLocalhost;
+
+// Show BYOPN only in dev mode
+if (vandev) {
+  document.getElementById("custom-phone-row").classList.remove("hidden");
+}
 
 // ---------------------------------------------------------------------------
 // Load config from server
@@ -83,29 +110,51 @@ async function loadConfig() {
 
 function updateCallBtnState() {
   if (CONFIG.calls_remaining <= 0) {
-    callBtn.disabled = true;
-    callBtn.title = `Daily limit reached (${CONFIG.max_calls_per_day}/day)`;
-    callBtn.textContent = "Limit Reached";
+    callRow.classList.add("hidden");
     previewBtn.disabled = true;
-    // Show the limit panel, hide the call panel
     limitPanel.classList.remove("hidden");
-    callPanel.classList.add("hidden");
+    rightPanel.classList.add("hidden");
   } else if (!previewPassed) {
-    callBtn.disabled = true;
-    callBtn.title = "Preview your message first";
+    callRow.classList.add("hidden");
   } else {
+    callRow.classList.remove("hidden");
     callBtn.disabled = false;
-    callBtn.title = "";
     callBtn.textContent = `Call Now (${CONFIG.calls_remaining} left today)`;
   }
 }
 
 // ---------------------------------------------------------------------------
-// Load representatives from API
+// Populate state dropdown — enabled states first, rest disabled
 // ---------------------------------------------------------------------------
-async function loadRepresentatives() {
+const ENABLED_STATES = new Set(["LA", "PA"]);
+
+const enabledStates = US_STATES.filter(([code]) => ENABLED_STATES.has(code));
+const disabledStates = US_STATES.filter(([code]) => !ENABLED_STATES.has(code));
+
+for (const [code, name] of enabledStates) {
+  const opt = document.createElement("option");
+  opt.value = code;
+  opt.textContent = name;
+  stateSelect.appendChild(opt);
+}
+
+const disabledGroup = document.createElement("optgroup");
+disabledGroup.label = "Coming soon";
+for (const [code, name] of disabledStates) {
+  const opt = document.createElement("option");
+  opt.value = code;
+  opt.textContent = name;
+  opt.disabled = true;
+  disabledGroup.appendChild(opt);
+}
+stateSelect.appendChild(disabledGroup);
+
+// ---------------------------------------------------------------------------
+// Load representatives by state
+// ---------------------------------------------------------------------------
+async function loadRepresentatives(state) {
   try {
-    const res = await fetch("/representatives");
+    const res = await fetch(`/representatives?state=${encodeURIComponent(state)}`);
     const data = await res.json();
     REPRESENTATIVES = data.representatives || [];
   } catch (err) {
@@ -113,6 +162,7 @@ async function loadRepresentatives() {
     REPRESENTATIVES = [];
   }
 
+  // Clear rep dropdown
   while (repSelect.options.length > 1) {
     repSelect.remove(1);
   }
@@ -127,23 +177,29 @@ async function loadRepresentatives() {
     }
     const opt = document.createElement("option");
     opt.value = rep.phone;
-    opt.textContent = rep.name;
+    opt.textContent = rep.name + (rep.party ? ` (${rep.party[0]})` : "");
     opt.dataset.name = rep.name;
     repSelect.lastElementChild.appendChild(opt);
   }
 }
 
+stateSelect.addEventListener("change", () => {
+  loadRepresentatives(stateSelect.value);
+});
+
 // Init
 loadConfig();
-loadRepresentatives();
 
-// Clear custom phone when rep is selected, and vice versa
+// Show rep phone when selected, clear custom fields
 repSelect.addEventListener("change", () => {
+  repPhoneDisplay.value = repSelect.value || "";
   customPhoneInput.value = "";
   customRepName.value = "";
 });
+// Clear rep phone when custom phone is used
 customPhoneInput.addEventListener("input", () => {
   repSelect.value = "";
+  repPhoneDisplay.value = "";
 });
 
 // ---------------------------------------------------------------------------
@@ -365,13 +421,14 @@ function getDialTarget() {
 // ---------------------------------------------------------------------------
 previewBtn.addEventListener("click", async () => {
   const name = document.getElementById("name").value.trim();
-  const address = document.getElementById("address").value.trim();
+  const state = stateSelect.value;
   const phone = document.getElementById("phone").value.trim();
   const message = messageEl.value.trim();
   const target = getDialTarget();
   const repName = target?.name || "your representative";
 
-  callPanel.classList.remove("hidden");
+  rightPanel.classList.remove("hidden");
+  callStatusBar.classList.add("hidden");
   transcriptEl.innerHTML = "";
   previewBtn.disabled = true;
   previewBtn.textContent = "Generating...";
@@ -384,7 +441,7 @@ previewBtn.addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         constituent_name: name || "Vanessa",
-        constituent_address: address,
+        constituent_state: state,
         constituent_phone_number: phone,
         rep_name: repName,
         issue_text: message,
@@ -437,7 +494,7 @@ form.addEventListener("submit", async (e) => {
   }
 
   const name = document.getElementById("name").value.trim();
-  const address = document.getElementById("address").value.trim();
+  const state = stateSelect.value;
   const phone = document.getElementById("phone").value.trim();
   const message = messageEl.value.trim();
   const listenIn = listenInCheckbox.checked;
@@ -458,7 +515,8 @@ form.addEventListener("submit", async (e) => {
 
   callBtn.disabled = true;
   callBtn.textContent = "Calling...";
-  callPanel.classList.remove("hidden");
+  rightPanel.classList.remove("hidden");
+  callStatusBar.classList.remove("hidden");
   transcriptEl.innerHTML = "";
   setStatus("Starting call...");
 
@@ -472,7 +530,7 @@ form.addEventListener("submit", async (e) => {
         body: {
           dialout_settings: [{ phoneNumber: target.phone }],
           constituent_name: name,
-          constituent_address: address,
+          constituent_state: state,
           constituent_phone_number: normalizedUserPhone,
           rep_name: target.name,
           issue_text: message,

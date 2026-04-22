@@ -67,8 +67,9 @@ load_dotenv(override=True)
 DEFAULT_SUBSTITUTION_DATA = {
     "constituent_name": "Vanessa",
     "rep": "Senator Bill Cassidy",
-    "constituent_address": os.getenv("CONSTITUENT_ADDRESS"),
+    "constituent_state": "Louisiana",
     "constituent_phone_number": os.getenv("CONSTITUENT_PHONE_NUMBER"),
+    "issue_text": "",
 }
 
 # Load prompt templates
@@ -84,8 +85,9 @@ def build_substitution_data(body: dict) -> dict:
     return {
         "constituent_name": body.get("constituent_name", DEFAULT_SUBSTITUTION_DATA["constituent_name"]),
         "rep": body.get("rep_name", DEFAULT_SUBSTITUTION_DATA["rep"]),
-        "constituent_address": body.get("constituent_address", DEFAULT_SUBSTITUTION_DATA["constituent_address"]),
+        "constituent_state": body.get("constituent_state", DEFAULT_SUBSTITUTION_DATA["constituent_state"]),
         "constituent_phone_number": body.get("constituent_phone_number", DEFAULT_SUBSTITUTION_DATA["constituent_phone_number"]),
+        "issue_text": body.get("issue_text", DEFAULT_SUBSTITUTION_DATA["issue_text"]),
     }
 
 VOICEMAIL_INDICATORS = [
