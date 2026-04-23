@@ -63,10 +63,20 @@
       </div>
 
       <div class="form-row">
-        <label for="message">Your Message</label>
-        <p class="hint">Type, paste a call template, or record yourself talking about the issue you care about.</p>
+        <label>Your Message</label>
+        <div class="radio-row message-mode-row">
+          <label>
+            <input type="radio" name="message-mode" value="template" checked />
+            Template
+          </label>
+          <label>
+            <input type="radio" name="message-mode" value="freestyle" />
+            Freestyle
+          </label>
+        </div>
+        <p class="hint" id="message-hint">Paste a call script from an organization. [NAME], [ADDRESS], [REP], [PHONE] will be substituted automatically.</p>
         <textarea id="message" name="message" rows="6" required
-          placeholder="Paste a call template from an organization, or write your own message. Use [NAME], [ADDRESS], etc. for substitution."></textarea>
+          placeholder="Paste a call template here, e.g. 'My name is [NAME] and I am a constituent from [ADDRESS]...'"></textarea>
         <div class="record-controls">
           <div class="radio-row">
             <label>

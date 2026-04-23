@@ -70,6 +70,30 @@ const recordBtn = document.getElementById("record-btn");
 const recordStatus = document.getElementById("record-status");
 const previewBtn = document.getElementById("preview-btn");
 const limitPanel = document.getElementById("limit-panel");
+const messageHint = document.getElementById("message-hint");
+
+// ---------------------------------------------------------------------------
+// Message mode toggle (template vs freestyle)
+// ---------------------------------------------------------------------------
+function getMessageMode() {
+  return document.querySelector('input[name="message-mode"]:checked').value;
+}
+
+document.querySelectorAll('input[name="message-mode"]').forEach((radio) => {
+  radio.addEventListener("change", () => {
+    if (getMessageMode() === "template") {
+      messageHint.textContent =
+        "Paste a call script from an organization. [NAME], [ADDRESS], [REP], [PHONE] will be substituted automatically.";
+      messageEl.placeholder =
+        "Paste a call template here, e.g. 'My name is [NAME] and I am a constituent from [ADDRESS]...'";
+    } else {
+      messageHint.textContent =
+        "Describe the issue you care about in your own words. The bot will craft an articulate message for you.";
+      messageEl.placeholder =
+        "e.g. 'I'm worried about cuts to public school funding and want my senator to vote against the bill'";
+    }
+  });
+});
 
 // ---------------------------------------------------------------------------
 // State
@@ -424,6 +448,7 @@ previewBtn.addEventListener("click", async () => {
   const state = stateSelect.value;
   const phone = document.getElementById("phone").value.trim();
   const message = messageEl.value.trim();
+  const mode = getMessageMode();
   const target = getDialTarget();
   const repName = target?.name || "your representative";
 
@@ -445,6 +470,7 @@ previewBtn.addEventListener("click", async () => {
         constituent_phone_number: phone,
         rep_name: repName,
         issue_text: message,
+        message_mode: mode,
       }),
     });
 
@@ -497,6 +523,7 @@ form.addEventListener("submit", async (e) => {
   const state = stateSelect.value;
   const phone = document.getElementById("phone").value.trim();
   const message = messageEl.value.trim();
+  const mode = getMessageMode();
   const listenIn = listenInCheckbox.checked;
 
   const target = getDialTarget();
@@ -534,6 +561,7 @@ form.addEventListener("submit", async (e) => {
           constituent_phone_number: normalizedUserPhone,
           rep_name: target.name,
           issue_text: message,
+          message_mode: mode,
           preview_passed: true,
           dev_secret: devSecret,
         },

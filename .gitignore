@@ -16,6 +16,7 @@ notes.txt
 # frontend build artifacts
 frontend/node_modules
 frontend/dist
+frontend/.vite
 
 # voice recordings
 temp_local_recordings

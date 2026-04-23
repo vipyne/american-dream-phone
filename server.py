@@ -360,6 +360,19 @@ async def clone_voice(request: Request):
 # ---------------------------------------------------------------------------
 # POST /preview — preview what the bot would say + moderation
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Talking points sources (for future sub-agent research)
+# ---------------------------------------------------------------------------
+TALKING_POINTS_URLS = [
+    # Whitelisted URLs the research sub-agent can consult for talking points.
+    # TODO: implement sub-agent that fetches and summarizes these for freestyle mode.
+    # "https://www.congress.gov/",
+    # "https://www.govtrack.us/",
+    # "https://legiscan.com/",
+    # https://legis.la.gov/legis
+    # https://www.palegis.us/legislation
+]
+
 MODERATION_PROMPT = """You are a content moderator for a civic engagement tool that helps constituents call their political representatives. Evaluate the user's message below.
 
 APPROVE the message if it is:
@@ -388,8 +401,27 @@ async def preview_call(request: Request):
     data = await request.json()
 
     sub_data = build_substitution_data(data)
-    voicemail_message = voicemail_message_template.format(**sub_data)
     issue_text = data.get("issue_text", "")
+    message_mode = data.get("message_mode", "freestyle")
+
+    # Template mode: substitute variables in the user's text
+    if message_mode == "template" and issue_text:
+        issue_text_substituted = issue_text
+        issue_text_substituted = issue_text_substituted.replace("[NAME]", sub_data["constituent_name"])
+        issue_text_substituted = issue_text_substituted.replace("[name]", sub_data["constituent_name"])
+        issue_text_substituted = issue_text_substituted.replace("[ADDRESS]", sub_data.get("constituent_state", ""))
+        issue_text_substituted = issue_text_substituted.replace("[address]", sub_data.get("constituent_state", ""))
+        issue_text_substituted = issue_text_substituted.replace("[STREET ADDRESS, CITY, ZIP]", sub_data.get("constituent_state", ""))
+        issue_text_substituted = issue_text_substituted.replace("[REP]", sub_data["rep"])
+        issue_text_substituted = issue_text_substituted.replace("[rep]", sub_data["rep"])
+        issue_text_substituted = issue_text_substituted.replace("[PHONE]", sub_data["constituent_phone_number"] or "")
+        issue_text_substituted = issue_text_substituted.replace("[phone]", sub_data["constituent_phone_number"] or "")
+        # Update sub_data so voicemail template uses the substituted text
+        sub_data["issue_text"] = issue_text_substituted
+    else:
+        sub_data["issue_text"] = issue_text
+
+    voicemail_message = voicemail_message_template.format(**sub_data)
 
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
@@ -411,7 +443,19 @@ async def preview_call(request: Request):
         }
 
         system_prompt = human_conversation_system_instruction
-        if issue_text:
+        if message_mode == "template" and issue_text:
+            system_prompt += (
+                f"\n\nThe constituent has provided a call script. Use it as closely as possible:\n{sub_data['issue_text']}\n\n"
+                "Deliver this script faithfully. Do not add, remove, or rephrase the constituent's words."
+            )
+        elif message_mode == "freestyle" and issue_text:
+            system_prompt += (
+                f"\n\nThe constituent described their concern:\n{issue_text}\n\n"
+                "Craft an articulate, concise message that captures their intent. "
+                "Stay faithful to their concerns — do not add claims or facts they did not provide. "
+                "Be polite but assertive."
+            )
+        elif issue_text:
             system_prompt += (
                 f"\n\nThe constituent's message about their issue:\n{issue_text}\n\n"
                 "Incorporate the above concerns into your conversation. "

@@ -269,8 +269,22 @@ VOICEMAIL DETECTION: If you hear any voicemail indicators such as "leave a messa
             await processor.push_frame(EndFrame())
         else:
             logger.info("Human detected — switching to conversation mode")
+            system_prompt = human_conversation_system_instruction
+            message_mode = body.get("message_mode", "freestyle")
+            if message_mode == "template" and issue_text:
+                system_prompt += (
+                    f"\n\nThe constituent has provided a call script. Use it as closely as possible:\n{issue_text}\n\n"
+                    "Deliver this script faithfully. Do not add, remove, or rephrase the constituent's words."
+                )
+            elif issue_text:
+                system_prompt += (
+                    f"\n\nThe constituent described their concern:\n{issue_text}\n\n"
+                    "Craft an articulate, concise message that captures their intent. "
+                    "Stay faithful to their concerns — do not add claims or facts they did not provide. "
+                    "Be polite but assertive."
+                )
             messages = [
-                {"role": "system", "content": human_conversation_system_instruction}
+                {"role": "system", "content": system_prompt}
             ]
             if conversation_history:
                 messages.extend(conversation_history)
