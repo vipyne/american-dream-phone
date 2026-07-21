@@ -4,7 +4,8 @@ version = "0.1.0"
 description = "AI-powered constituent phone call bot"
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "pipecat-ai[daily,cartesia,openai,deepgram,silero,anthropic]>=0.0.107",
+    "pipecat-ai[daily,cartesia,openai,deepgram,silero,anthropic]>=1.5.0,<1.6.0",
+    "pipecat-ai-prebuilt",
     "fastapi==0.115.6",
     "uvicorn",
     "python-dotenv",

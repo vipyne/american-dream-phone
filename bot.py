@@ -39,14 +39,14 @@ from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.extensions.ivr.ivr_navigator import IVRNavigator, IVRStatus
 from pipecat.frames.frames import (
     EndFrame,
-    EndTaskFrame,
+    EndWorkerFrame,
     LLMMessagesUpdateFrame,
     TextFrame,
     VADParamsUpdateFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.runner import WorkerRunner
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -206,7 +206,7 @@ async def run_bot(
     )
 
     async def terminate_call_back(params: FunctionCallParams):
-        await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+        await params.llm.queue_frame(EndWorkerFrame(), FrameDirection.UPSTREAM)
 
     llm.register_function("terminate_call", terminate_call_back)
 
@@ -246,7 +246,7 @@ VOICEMAIL DETECTION: If you hear any voicemail indicators such as "leave a messa
         ]
     )
 
-    task = PipelineTask(
+    task = PipelineWorker(
         pipeline,
         params=PipelineParams(allow_interruptions=True),
     )
@@ -377,7 +377,7 @@ VOICEMAIL DETECTION: If you hear any voicemail indicators such as "leave a messa
     # =================================
     # Run
     # =================================
-    runner = PipelineRunner(handle_sigint=handle_sigint)
+    runner = WorkerRunner(handle_sigint=handle_sigint)
     await runner.run(task)
 
     if hangup_timer and not hangup_timer.done():

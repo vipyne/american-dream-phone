@@ -1,4 +1,5 @@
-pipecat-ai[daily,cartesia,openai,deepgram,silero,anthropic]>=0.0.107
+pipecat-ai[daily,cartesia,openai,deepgram,silero,anthropic]>=1.5.0,<1.6.0
+pipecat-ai-prebuilt
 fastapi==0.115.6
 uvicorn
 python-dotenv
