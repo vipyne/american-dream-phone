@@ -32,6 +32,8 @@ from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
 from loguru import logger
 
+import offline_config  # must precede pipecat imports (sets HF_HOME etc.)
+
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -54,12 +56,11 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import DailyRunnerArguments, RunnerArguments
-from pipecat.services.anthropic.llm import AnthropicLLMService
-from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.transports.daily.transport import DailyParams, DailyTransport
+
+from services import create_llm, create_stt, create_tts
 
 load_dotenv(override=True)
 
@@ -179,21 +180,9 @@ async def run_bot(
     # =================================
     # Services
     # =================================
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-
-    tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY", ""),
-        settings=CartesiaTTSService.Settings(
-            voice="b7d50908-b17c-442d-ad8d-810c63997ed9",  # Helpful Woman
-        ),
-    )
-
-    llm = AnthropicLLMService(
-        api_key=os.getenv("ANTHROPIC_API_KEY"),
-        settings=AnthropicLLMService.Settings(
-            model="claude-sonnet-4-6",
-        ),
-    )
+    stt = create_stt()
+    tts = create_tts()
+    llm = create_llm()
 
     # =================================
     # Tools (available throughout the call)
@@ -417,4 +406,5 @@ if __name__ == "__main__":
     # For the full app with frontend, use: uv run python server.py
     from pipecat.runner.run import main
 
+    offline_config.preflight_ollama()
     main()

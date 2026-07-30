@@ -48,6 +48,43 @@ cd frontend && npm run dev
 
 Open http://localhost:5173 in your browser. The frontend proxies API requests to the backend at `localhost:7860`.
 
+### offline mode (local models, no paid AI APIs)
+
+Set `OFFLINE=true` in `.env` to swap the cloud STT/TTS/LLM services for fully
+local ones. The frontend and Daily transport are unchanged — PSTN dialout still
+works, just powered by local models. Only `DAILY_API_KEY` is needed.
+
+| Component | Online | Offline |
+|-----------|--------|---------|
+| STT | Deepgram | Whisper large-v3-turbo (MLX, on-device) |
+| TTS | Cartesia | Kokoro (ONNX, on-device) |
+| LLM | Anthropic Claude | qwen2.5:14b via Ollama |
+| `/preview` + moderation | Anthropic | Ollama |
+| Voice cloning | Cartesia | disabled |
+
+Prerequisites: Apple Silicon, [Ollama](https://ollama.com) installed, and the
+sibling `locat` repo checked out next to this one (its `models/` directory
+holds the ~10 GB of weights; paths are overridable via `HF_HOME`,
+`KOKORO_MODEL_PATH`, `KOKORO_VOICES_PATH`, `OLLAMA_MODELS` in `.env`).
+
+```bash
+# Terminal 0 — local LLM server (serves ../locat/models/ollama)
+./scripts/run_ollama.sh
+
+# Terminal 1 - frontend
+cd frontend && npm run build && npm run dev
+
+# Terminal 2 — API server (preflight checks Ollama + Kokoro weights, then starts)
+OFFLINE=true uv run python server.py --host 0.0.0.0 --port 7860
+```
+
+open http://localhost:5173/
+
+Expect noticeably higher STT latency than
+Deepgram (Whisper transcribes whole utterances on speech-stop), and less
+reliable IVR navigation than Claude — test against a real IVR before trusting
+offline PSTN calls.
+
 ### headless / curl testing
 
 If you don't need the frontend, you can still run the bot directly:

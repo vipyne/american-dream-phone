@@ -31,6 +31,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
 
+import offline_config  # must precede any pipecat import (via `import bot` below)
+
 load_dotenv(override=True)
 
 RECORDINGS_DIR = Path(__file__).parent / "temp_local_recordings"
@@ -40,10 +42,11 @@ RECORDINGS_DIR.mkdir(exist_ok=True)
 # Demo mode config
 # ---------------------------------------------------------------------------
 DEMO_MODE = os.getenv("DEMO_MODE", "true").lower() == "true"
+OFFLINE = offline_config.OFFLINE
 DEV_SECRET = os.getenv("DEV_SECRET", "")  # Secret to unlock dev mode (BYOPN)
 MAX_CALLS_PER_DAY = 2
 MAX_CALL_DURATION_SECS = 5 * 60  # 5 minutes
-VOICE_CLONING_ENABLED = not DEMO_MODE
+VOICE_CLONING_ENABLED = (not DEMO_MODE) and not OFFLINE  # cloning is Cartesia-only
 
 # In-memory call counter: { "YYYY-MM-DD": count }
 # Resets on server restart. Good enough without a DB.
@@ -170,6 +173,7 @@ app.add_middleware(
 async def get_config():
     return {
         "demo_mode": DEMO_MODE,
+        "offline": OFFLINE,
         "voice_cloning_enabled": VOICE_CLONING_ENABLED,
         "max_calls_per_day": MAX_CALLS_PER_DAY,
         "calls_remaining": _calls_remaining(),
@@ -424,7 +428,7 @@ async def preview_call(request: Request):
     voicemail_message = voicemail_message_template.format(**sub_data)
 
     api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
+    if not OFFLINE and not api_key:
         return JSONResponse({"error": "ANTHROPIC_API_KEY not configured"}, status_code=500)
 
     # --- Run moderation + preview in parallel ---
@@ -432,15 +436,51 @@ async def preview_call(request: Request):
     human_preview = ""
 
     async with aiohttp.ClientSession() as session:
-        # Build both requests
-        moderation_body = {
-            "model": "claude-sonnet-4-6",
-            "max_tokens": 256,
-            "system": MODERATION_PROMPT,
-            "messages": [
-                {"role": "user", "content": issue_text or "(no message provided)"},
-            ],
-        }
+        # Provider-neutral LLM call → (status, text, raw response)
+        if OFFLINE:
+            ollama_base = offline_config.ollama_base_url().rstrip("/")
+            ollama_model = offline_config.llm_model()
+
+            async def call_llm(system: str, user: str, max_tokens: int):
+                body = {
+                    "model": ollama_model,
+                    "max_tokens": max_tokens,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    "stream": False,
+                }
+                async with session.post(f"{ollama_base}/chat/completions", json=body) as resp:
+                    data = await resp.json()
+                    text = ""
+                    if resp.status == 200:
+                        text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    return resp.status, text, data
+        else:
+            headers = {
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            }
+
+            async def call_llm(system: str, user: str, max_tokens: int):
+                body = {
+                    "model": "claude-sonnet-4-6",
+                    "max_tokens": max_tokens,
+                    "system": system,
+                    "messages": [{"role": "user", "content": user}],
+                }
+                async with session.post(
+                    "https://api.anthropic.com/v1/messages",
+                    json=body,
+                    headers=headers,
+                ) as resp:
+                    data = await resp.json()
+                    text = ""
+                    if resp.status == 200:
+                        text = data.get("content", [{}])[0].get("text", "")
+                    return resp.status, text, data
 
         system_prompt = human_conversation_system_instruction
         if message_mode == "template" and issue_text:
@@ -462,42 +502,25 @@ async def preview_call(request: Request):
                 "Stay faithful to the constituent's words — do not add claims or facts they did not provide."
             )
 
-        preview_body = {
-            "model": "claude-sonnet-4-6",
-            "max_tokens": 1024,
-            "system": system_prompt,
-            "messages": [
-                {"role": "user", "content": "Hello, Senator's office, how can I help you?"},
-            ],
-        }
-
-        headers = {
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        }
-
         # Fire both requests concurrently
-        async def call_anthropic(body):
-            async with session.post(
-                "https://api.anthropic.com/v1/messages",
-                json=body,
-                headers=headers,
-            ) as resp:
-                return resp.status, await resp.json()
+        mod_task = asyncio.create_task(
+            call_llm(MODERATION_PROMPT, issue_text or "(no message provided)", 256)
+        )
+        preview_task = asyncio.create_task(
+            call_llm(system_prompt, "Hello, Senator's office, how can I help you?", 1024)
+        )
 
-        mod_task = asyncio.create_task(call_anthropic(moderation_body))
-        preview_task = asyncio.create_task(call_anthropic(preview_body))
-
-        mod_status, mod_data = await mod_task
-        preview_status, preview_data = await preview_task
+        mod_status, mod_text, mod_data = await mod_task
+        preview_status, preview_text, preview_data = await preview_task
 
     # Parse moderation
     if mod_status == 200:
-        mod_text = mod_data.get("content", [{}])[0].get("text", "")
         try:
             import json
-            moderation_result = json.loads(mod_text)
+            # Small local models often wrap JSON in markdown fences
+            cleaned = mod_text.strip()
+            cleaned = cleaned.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+            moderation_result = json.loads(cleaned)
         except (json.JSONDecodeError, ValueError):
             logger.warning(f"Failed to parse moderation response: {mod_text}")
             moderation_result = {"approved": True}  # fail open
@@ -506,9 +529,9 @@ async def preview_call(request: Request):
 
     # Parse preview
     if preview_status == 200:
-        human_preview = preview_data.get("content", [{}])[0].get("text", "")
+        human_preview = preview_text
     else:
-        logger.error(f"Anthropic preview failed: {preview_status} {preview_data}")
+        logger.error(f"LLM preview failed: {preview_status} {preview_data}")
         human_preview = "(Preview unavailable — LLM error)"
 
     return {
@@ -557,9 +580,13 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=7860, help="Server port (default: 7860)")
     args = parser.parse_args()
 
+    offline_config.preflight_ollama()
+
     print()
     print(f"  American Dream Phone server")
     print(f"  → http://{args.host}:{args.port}")
+    if OFFLINE:
+        print(f"  → OFFLINE mode ON (Whisper-MLX / Ollama {offline_config.llm_model()} / Kokoro — no paid AI APIs)")
     if DEMO_MODE:
         print(f"  → Demo mode ON ({MAX_CALLS_PER_DAY} calls/day, {MAX_CALL_DURATION_SECS // 60}min limit, whitelist only)")
     else:
