@@ -159,5 +159,5 @@ Each test starts a session and returns a Daily room URL. Open it in your browser
 
 ## credits
 
-- huge shout out to [this pipecat example](https://github.com/pipecat-ai/pipecat/tree/main/examples/phone-chatbot)
+- huge shout out to [this pipecat example](https://github.com/pipecat-ai/pipecat-examples/tree/main/phone-chatbot)
 - [E l e c t r o n i c Dream Phone](https://consolemods.org/wiki/Dreamphone)
