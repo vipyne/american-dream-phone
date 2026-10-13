@@ -10,6 +10,8 @@ See a demo of it in action [here](https://www.loom.com/share/ce0e8051e8cb430285a
 The first thing you need to know is that in the 90's, there was a board game called [Dream Phone](https://consolemods.org/wiki/Dreamphone). This is a real thing that exists.
 With that whimsy in mind, `American Dream Phone` is a [Pipecat](https://github.com/pipecat-ai/pipecat) AI Voice Agent to help you call your political representatives. Some may call it 'revenge of the robo-calls', I call it civic engagement.
 
+<img src="images/AmDrPh_screenshot_1.png" width="360px">  <img src="images/AmDrPh_screenshot_2.png" width="360px">
+
 ## dependencies
 
 - Python 3.12+
