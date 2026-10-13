@@ -36,12 +36,14 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.classifiers.llm.classifier import LLMClassifier
 from pipecat.extensions.ivr.ivr_navigator import IVRNavigator, IVRStatus
+from pipecat.extensions.voicemail.voicemail_detector import VoicemailDetector
 from pipecat.frames.frames import (
     EndFrame,
     EndWorkerFrame,
     LLMMessagesUpdateFrame,
-    TextFrame,
+    TTSSpeakFrame,
     VADParamsUpdateFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
@@ -90,43 +92,14 @@ def build_substitution_data(body: dict) -> dict:
         "issue_text": body.get("issue_text", DEFAULT_SUBSTITUTION_DATA["issue_text"]),
     }
 
-VOICEMAIL_INDICATORS = [
-    "leave a message",
-    "after the beep",
-    "after the tone",
-    "no one is available",
-    "record your message",
-    "you have reached voicemail",
-    "is unavailable",
-    "is not available",
-    "the person you are trying to reach",
-    "the number you have dialed",
-    "voice messaging system",
-    "voicemail",
-    "voice mail",
-    "mailbox is full",
-    "not in the office",
-    "out of the office",
-    "currently closed",
-    "office is closed",
-    "office hours",
-    "call back",
-    "call us back",
-    "please try again",
-    "god bless the united states",
-    "beep",
-]
-
-
-def check_for_voicemail(conversation_history: list) -> bool:
-    """Check conversation history for voicemail indicators."""
-    for message in conversation_history:
-        content = message.get("content", "").lower()
-        for indicator in VOICEMAIL_INDICATORS:
-            if indicator in content:
-                logger.info(f"Voicemail detected: found '{indicator}' in conversation")
-                return True
-    return False
+def make_llm() -> AnthropicLLMService:
+    """Create LLM service."""
+    return AnthropicLLMService(
+        api_key=os.getenv("ANTHROPIC_API_KEY"),
+        settings=AnthropicLLMService.Settings(
+            model="claude-sonnet-4-6",
+        ),
+    )
 
 
 def get_dialout_settings(body: dict) -> Optional[List[Dict[str, Any]]]:
@@ -188,15 +161,10 @@ async def run_bot(
         ),
     )
 
-    llm = AnthropicLLMService(
-        api_key=os.getenv("ANTHROPIC_API_KEY"),
-        settings=AnthropicLLMService.Settings(
-            model="claude-sonnet-4-6",
-        ),
-    )
+    llm = make_llm()
 
     # =================================
-    # Tools (available throughout the call)
+    # Tools (enabled in conversation mode; never during IVR classification)
     # =================================
     terminate_call_function = FunctionSchema(
         name="terminate_call",
@@ -217,13 +185,19 @@ async def run_bot(
     # =================================
     ivr_navigator = IVRNavigator(
         llm=llm,
-        ivr_prompt="""You are calling a political representative's office. Your goal is to speak with someone about a constituent's concerns. If asked to press a button or make a selection, choose the option to speak with a representative or leave a message.
-
-VOICEMAIL DETECTION: If you hear any voicemail indicators such as "leave a message", "after the beep", "after the tone", "no one is available", "voicemail", "is unavailable", "office is closed", "office hours", "call back later", or similar — immediately respond with <mode>conversation</mode> to switch to message-leaving mode. Do NOT try to navigate voicemail as an IVR menu.""",
+        ivr_prompt="""You are calling a political representative's office. Your goal is to speak with someone about a constituent's concerns. If asked to press a button or make a selection, choose the option to speak with a representative or leave a message.""",
     )
 
-    # Context + aggregators
-    context = LLMContext(tools=tools)
+    # =================================
+    # Voicemail Detector (separate classifier LLM, out-of-pipeline inference)
+    # =================================
+    voicemail_detector = VoicemailDetector(
+        classifier=LLMClassifier(llm=make_llm()),
+    )
+
+    # Context + aggregators. Tools attach on conversation mode, keeping IVR
+    # classification tool-free.
+    context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
@@ -238,9 +212,11 @@ VOICEMAIL DETECTION: If you hear any voicemail indicators such as "leave a messa
         [
             transport.input(),
             stt,
+            voicemail_detector.detector(),
             user_aggregator,
             ivr_navigator,
             tts,
+            voicemail_detector.gate(),
             transport.output(),
             assistant_aggregator,
         ]
@@ -252,49 +228,49 @@ VOICEMAIL DETECTION: If you hear any voicemail indicators such as "leave a messa
     )
 
     # =================================
+    # Voicemail Event: greeting classified as voicemail
+    # =================================
+    @voicemail_detector.event_handler("on_voicemail_detected")
+    async def on_voicemail_detected(processor):
+        logger.info("Voicemail detected — leaving message via TTS")
+        # push_frame sends text downstream to TTS; gate is open after verdict.
+        await processor.push_frame(TTSSpeakFrame(voicemail_message))
+        await task.stop_when_done()
+
+    # =================================
     # IVR Event: conversation detected
     # =================================
     @ivr_navigator.event_handler("on_conversation_detected")
     async def on_conversation_detected(processor, conversation_history):
         logger.info(f"Conversation detected. History: {conversation_history}")
-
-        is_voicemail = check_for_voicemail(conversation_history)
-
-        if is_voicemail:
-            logger.info("Voicemail detected — leaving message directly via TTS")
-            # Use processor.push_frame to send text downstream directly to TTS,
-            # bypassing the LLM (task.queue_frame would route through the LLM
-            # which would "describe" the message instead of speaking it).
-            await processor.push_frame(TextFrame(text=voicemail_message))
-            await processor.push_frame(EndFrame())
-        else:
-            logger.info("Human detected — switching to conversation mode")
-            system_prompt = human_conversation_system_instruction
-            message_mode = body.get("message_mode", "freestyle")
-            if message_mode == "template" and issue_text:
-                system_prompt += (
-                    f"\n\nThe constituent has provided a call script. Use it as closely as possible:\n{issue_text}\n\n"
-                    "Deliver this script faithfully. Do not add, remove, or rephrase the constituent's words."
-                )
-            elif issue_text:
-                system_prompt += (
-                    f"\n\nThe constituent described their concern:\n{issue_text}\n\n"
-                    "Craft an articulate, concise message that captures their intent. "
-                    "Stay faithful to their concerns — do not add claims or facts they did not provide. "
-                    "Be polite but assertive."
-                )
-            messages = [
-                {"role": "system", "content": system_prompt}
-            ]
-            if conversation_history:
-                messages.extend(conversation_history)
-            await task.queue_frame(
-                LLMMessagesUpdateFrame(messages=messages, run_llm=True)
+        logger.info("Human detected — switching to conversation mode")
+        context.set_tools(tools)
+        system_prompt = human_conversation_system_instruction
+        message_mode = body.get("message_mode", "freestyle")
+        if message_mode == "template" and issue_text:
+            system_prompt += (
+                f"\n\nThe constituent has provided a call script. Use it as closely as possible:\n{issue_text}\n\n"
+                "Deliver this script faithfully. Do not add, remove, or rephrase the constituent's words."
             )
-            # Reduce VAD stop_secs for natural conversation flow
-            await task.queue_frame(
-                VADParamsUpdateFrame(params=VADParams(stop_secs=0.8))
+        elif issue_text:
+            system_prompt += (
+                f"\n\nThe constituent described their concern:\n{issue_text}\n\n"
+                "Craft an articulate, concise message that captures their intent. "
+                "Stay faithful to their concerns — do not add claims or facts they did not provide. "
+                "Be polite but assertive."
             )
+        messages = [
+            {"role": "system", "content": system_prompt}
+        ]
+        if conversation_history:
+            messages.extend(conversation_history)
+        await task.queue_frame(
+            LLMMessagesUpdateFrame(messages=messages, run_llm=True)
+        )
+        # Reduce VAD stop_secs for natural conversation flow
+        await task.queue_frame(
+            VADParamsUpdateFrame(params=VADParams(stop_secs=0.8))
+        )
 
     @ivr_navigator.event_handler("on_ivr_status_changed")
     async def on_ivr_status_changed(processor, status):
